@@ -62,7 +62,7 @@ function Frame() {
       if (e.key === "Escape" && !e.defaultPrevented && s.route.view === "conversation") {
         if (s.detailsOpen) a.toggleDetails(false);
         else if (s.route.thread) void a.go({ ...s.route, thread: null, message: null });
-        else void a.maybeRead();
+        else void a.markRead();
       }
     };
     const links = (e: MouseEvent) => {

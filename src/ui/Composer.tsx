@@ -78,6 +78,8 @@ export function Composer({ conversation, thread, editing }: { conversation: numb
     shownKey.current = key;
     names.current = new Map();
     setText(display(snapshot().drafts[key] ?? "", names.current, personName, channelName));
+    // Files being added belonged to the conversation left: they go.
+    uploads.forEach(drop);
     setUploads([]);
     setSuggest(null);
   }, [key]);
@@ -290,7 +292,9 @@ export function Composer({ conversation, thread, editing }: { conversation: numb
               {picking ? <EmojiPicker onClose={() => { setPicking(false); area.current?.focus(); }} onPick={e => {
                 const t = area.current!;
                 const at = t.selectionStart;
-                setText(text.slice(0, at) + e + text.slice(t.selectionEnd));
+                const next = text.slice(0, at) + e + text.slice(t.selectionEnd);
+                setText(next);
+                if (!editing) a.keepDraft(conversation, thread, tokens(next, names.current, specials));
                 setPicking(false);
                 requestAnimationFrame(() => { t.focus(); t.setSelectionRange(at + e.length, at + e.length); });
               }} /> : null}

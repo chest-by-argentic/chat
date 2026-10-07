@@ -186,6 +186,19 @@ test("threads page their replies; reading only goes forward", async () => {
   assert.equal(Number(still.last_read), top.id, "never back");
 });
 
+test("posts at once in one conversation: ids follow the order they are kept", async () => {
+  const c = await channel(camille, "public", { members: [sam.id, robin.id] });
+  const sent = await Promise.all(Array.from({ length: 12 }, (_, i) => say([camille, sam, robin][i % 3], c.id, `burst ${i}`)));
+  const rows = await lab.sql`select id, xmin::text::bigint as tx from messages where conversation_id = ${c.id} and kind = 'message' order by id`;
+  assert.equal(rows.length, 12);
+  const txs = rows.map(r => Number(r.tx));
+  assert.deepEqual(txs, [...txs].sort((x, y) => x - y), "a later id never commits before an earlier one");
+  const [conv] = await lab.sql`select last_message_id, last_posted_id from conversations where id = ${c.id}`;
+  assert.equal(Number(conv.last_message_id), Math.max(...sent.map(m => m.id)));
+  const page = await ok(sam, "GET", `/conversations/${c.id}/messages`);
+  assert.equal(page.messages.filter(m => m.kind === "message").length, 12);
+});
+
 test("direct messages notify every message, in the member's language, and set the badge", async () => {
   const d = await ok(robin, "POST", "/direct", { members: [hugo.id] });
   const before = lab.chest.notifications.length, badge = lab.chest.badges.get(hugo.id) ?? 0;
@@ -384,6 +397,8 @@ test("erasure: the person's words, files and places go; the Chest is told", asyn
   assert.equal(kept.body, "");
   assert.equal((await lab.sql`select 1 from reactions where member_id = ${hugo.id}`).length, 0);
   assert.equal((await lab.sql`select 1 from conversation_members where member_id = ${hugo.id}`).length, 0);
+  const [after] = await lab.sql`select last_message_id from conversations where id = ${c.id}`;
+  assert.equal(Number(after.last_message_id), root.id, "the conversation's last message is what remains");
   assert.ok(lab.chest.acknowledged.includes(erasure));
   assert.ok(![...lab.chest.files.keys()].some(name => name.startsWith(`u/${hugo.id}/`)), "their uploads, sent or not, are gone");
 });

@@ -11,7 +11,8 @@ import { ApiError, del, get, patch, post, put } from "./api.js";
 
 // A message the page shows: one of the tool's, or one being sent (a
 // negative id until the tool answers).
-export type Shown = Message & { pending?: "sending" | "failed"; key?: string };
+export type Outgoing = { object: string; name: string; info: FileInfo };
+export type Shown = Message & { pending?: "sending" | "failed"; key?: string; outgoing?: Outgoing[] };
 
 type PageState = { conversation: number; messages: Shown[]; before: boolean; after: boolean; loading: boolean; newLine: number | null; focus: number | null };
 type ThreadState = { root: Shown; replies: Shown[]; more: boolean; following: boolean; lastRead: number; loading: boolean };
@@ -98,6 +99,9 @@ export function createStore(initial: Initial) {
   // A draft is kept once the member pauses: its timer per conversation and
   // thread.
   const draftTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // A draft being kept: a message sent meanwhile waits for it, so that the
+  // post (which forgets the draft) comes after it.
+  const draftRequests = new Map<string, Promise<unknown>>();
   let lastTyping = 0;
   let reading = false;
   // A conversation marked unread stays so while the member stays in it.
@@ -252,7 +256,11 @@ export function createStore(initial: Initial) {
       // Taken out (or never let in): no live channel any more; the sidebar
       // says what the member still has.
       channel.on("kicked", () => { follow(null); void refreshSidebar(); }),
-      channel.on("refused", () => { follow(null); void refreshSidebar(); }),
+      channel.on("refused", code => {
+        follow(null);
+        if (code === "forbidden") void refreshSidebar();
+        else setTimeout(() => { if (state.viewing?.id === id && state.viewing.joined && !current) follow(id); }, 5000);
+      }),
     ];
     current = { id, channel, off };
   };
@@ -260,10 +268,28 @@ export function createStore(initial: Initial) {
   // catchUp sets right what live events may have missed (they come at
   // most once): the latest page again, or the messages shown, and the open
   // thread.
+  let catchUpAfterLoad = false;
   const catchUp = async (id: number) => {
     const page = state.page;
     if (!page || page.conversation !== id) return;
-    if (!page.after) await reloadPage(id);
+    // A page being loaded: what came meanwhile is fetched once it is in.
+    if (page.loading) { catchUpAfterLoad = true; return; }
+    if (!page.after) {
+      const newest = [...page.messages].reverse().find(m => m.id > 0)?.id;
+      if (newest === undefined) await reloadPage(id);
+      else {
+        try {
+          const newer = await get<{ messages: Message[]; after: boolean }>(`/conversations/${id}/messages?after=${newest}`);
+          if (newer.after) await reloadPage(id);
+          else {
+            await known(peopleOf(newer.messages));
+            merge(newer.messages);
+            const shown = page.messages.filter(m => m.id > 0).map(m => m.id).slice(-200);
+            if (shown.length) merge(await get<Message[]>(`/messages?ids=${shown.join(",")}`));
+          }
+        } catch { /* the next join tries again */ }
+      }
+    }
     else {
       const shown = page.messages.filter(m => m.id > 0).map(m => m.id);
       try { if (shown.length) merge(await get<Message[]>(`/messages?ids=${shown.slice(-200).join(",")}`)); } catch { /* the next join tries again */ }
@@ -279,8 +305,12 @@ export function createStore(initial: Initial) {
         if (s.viewing?.id !== id) return {};
         // What is being sent, or failed, stays where it was.
         const pending = s.page?.conversation === id ? s.page.messages.filter(m => m.pending) : [];
-        return { page: { conversation: id, ...page, messages: [...page.messages, ...pending], loading: false, newLine: s.page?.conversation === id ? s.page.newLine : null, focus: at.around ?? null } };
+        return { page: { conversation: id, ...page, messages: [...page.messages, ...pending], loading: false, newLine: s.page?.conversation === id ? s.page.newLine : null, focus: at.around ?? (s.page?.conversation === id ? s.page.focus : null) } };
       });
+      if (catchUpAfterLoad) {
+        catchUpAfterLoad = false;
+        void catchUp(id);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) set({ missing: true, page: null });
       else fail(error);
@@ -490,6 +520,15 @@ export function createStore(initial: Initial) {
       if (value) void maybeRead();
     },
     maybeRead,
+    // markRead marks the conversation shown read, as the member asks (Esc).
+    async markRead() {
+      const viewing = state.viewing;
+      if (!viewing?.joined || !viewing.lastMessageId) return;
+      heldUnread = null;
+      updateConversation(viewing.id, c => ({ ...c, lastRead: c.lastMessageId, unread: 0, mentions: 0 }));
+      set(s => ({ page: s.page ? { ...s.page, newLine: null } : null }));
+      try { await put(`/conversations/${viewing.id}/read`, { message: viewing.lastMessageId }); } catch { /* read again later */ }
+    },
     setPane(pane: ViewState["pane"]) { set({ pane }); },
     openDialog(dialog: Dialog | null) { set({ dialog }); },
     setEditing(id: number | null) { set({ editing: id }); },
@@ -548,12 +587,12 @@ export function createStore(initial: Initial) {
     },
 
     // send: the message shows at once, then as the tool kept it.
-    async send(conversation: number, thread: number | null, text: string, files: { object: string; name: string; info: FileInfo }[]) {
+    async send(conversation: number, thread: number | null, text: string, files: Outgoing[]) {
       const key = `p${Date.now()}${Math.random()}`;
       const draft: Shown = {
         id: -Date.now(), conversation, thread, author: state.me.id, kind: "message", text, meta: null, mentions: [], mentionAll: false,
         createdAt: new Date().toISOString(), editedAt: null, deleted: false, pinned: false, replyCount: 0, lastReplyAt: null, repliers: [],
-        reactions: [], files: files.map(f => f.info), saved: false, pending: "sending", key,
+        reactions: [], files: files.map(f => f.info), saved: false, pending: "sending", key, outgoing: files,
       };
       const place = (m: Shown | null) => set(s => {
         const swap = (list: Shown[]) => {
@@ -572,6 +611,7 @@ export function createStore(initial: Initial) {
       if (thread === null && heldUnread === conversation) heldUnread = null;
       set(s => ({ drafts: Object.fromEntries(Object.entries(s.drafts).filter(([k]) => k !== draftKey(conversation, thread))) }));
       try {
+        await draftRequests.get(draftKey(conversation, thread));
         const sent = await post<Message>(`/conversations/${conversation}/messages`, { text, thread, files: files.map(f => ({ object: f.object, name: f.name })) });
         place(sent);
         // Writing in a thread follows it.
@@ -589,7 +629,7 @@ export function createStore(initial: Initial) {
         page: s.page ? { ...s.page, messages: s.page.messages.filter(x => x.key !== m.key) } : null,
         thread: s.thread ? { ...s.thread, replies: s.thread.replies.filter(x => x.key !== m.key) } : null,
       }));
-      await actions.send(m.conversation, m.thread, m.text ?? "", []);
+      await actions.send(m.conversation, m.thread, m.text ?? "", m.outgoing ?? []);
     },
     discard(m: Shown) {
       set(s => ({
@@ -660,7 +700,9 @@ export function createStore(initial: Initial) {
       clearTimeout(draftTimers.get(key));
       draftTimers.set(key, setTimeout(() => {
         draftTimers.delete(key);
-        void put("/drafts", { conversation, thread, text }).catch(() => { /* kept on the page; the next keystroke tries again */ });
+        const kept = put("/drafts", { conversation, thread, text }).catch(() => { /* kept on the page; the next keystroke tries again */ });
+        draftRequests.set(key, kept);
+        void kept.finally(() => { if (draftRequests.get(key) === kept) draftRequests.delete(key); });
       }, 800));
     },
     typing(conversation: number, thread: number | null) {

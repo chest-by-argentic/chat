@@ -19,6 +19,9 @@ create table conversations (
   -- everyone joins it at their first visit
   is_default boolean not null default false,
   last_message_id bigint not null default 0,
+  -- the last id written in it (messages, replies, the tool's lines): a
+  -- write with a smaller one takes a new id, so ids follow commit order
+  last_posted_id bigint not null default 0,
   last_message_at timestamptz,
   constraint conversation_shape check ((kind = 'direct') = (name is null) and (kind = 'direct') = (direct_key is not null))
 );

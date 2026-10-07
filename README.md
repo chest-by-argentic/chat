@@ -33,7 +33,7 @@ builds; tool contract 0.5, the SDK as the packed tarball in `vendor/`.
 | `src/ui/` | The page: `store.ts` (state, actions, live events), `Chat.tsx` and its panes |
 | `src/client/` | The browser's entry (hydration) and the stylesheet |
 | `test/` | Unit tests (`units.test.mjs`), the API against PostgreSQL and the fake Chest (`api.test.mjs`), the browser test (`browser/`), the local Chest of the tests (`lab/`) |
-| `vendor/chest-sdk-0.5.0.tgz` | The SDK (never edited here) |
+| `vendor/chest-sdk-0.5.0.tgz` | The SDK (never edited here). Today packed from Chest-SDK `main` (sealed values) merged locally with the realtime branch (PR #30, not merged yet); once realtime is on `main`, the Chest repository's `npm run sync:sdk` repacks it from there |
 
 ## Data
 
@@ -45,7 +45,7 @@ when shown. Every text a member writes is sealed, bound to its row:
 | `conversations` | kind, name (channels), the default channel, archive, last message | `about` (`about:<id>`) |
 | `conversation_members` | the realtime membership table of `c:{id}`; per member: added in person or by a group, last read, notification level, star | — |
 | `conversation_groups`, `conversation_leaves` | groups given a channel; who left one a group gives them | — |
-| `messages` | author, kind (a message, or a line of the tool), thread, mentions (members of the conversation only), `@channel` / `@here`, times, pin, reply count and repliers | `body` (`m:<id>`; the id is taken under the conversation's lock before sealing) |
+| `messages` | author, kind (a message, or a line of the tool), thread, mentions (members of the conversation only), `@channel` / `@here`, times, pin, reply count and repliers | `body` (`m:<id>`: the id is taken and the body sealed first; the write then checks, under the conversation's lock, that no later id was written, else takes a new one — ids follow commit order) |
 | `reactions`, `saved`, `thread_follows` | as named | — |
 | `attachments` | the Chest's object (`u/<member>/<random>`), type, size, image size | `name` (`f:<object>`) |
 | `drafts` | per member, conversation and thread | `body` (`d:<member>:<conversation>:<thread>`) |
@@ -86,10 +86,13 @@ when shown. Every text a member writes is sealed, bound to its row:
 
 ## Memory
 
-Measured on a Mac (Node 22, `npm run memory`, three runs each): **at rest
-79–80 MiB, the Perseus starter 77–80 MiB** — the same within the noise of
-a run (the tool's own code, the PostgreSQL client and the SDK add about
-2.7 MiB, offset by `hono/tiny` and a minified server). After a burst of
+Measured on a Mac (Node 22, `npm run memory`, resident size three seconds
+after start): **Chat 76.8–81.8 MiB at rest (median 79.0 over six runs),
+the Perseus starter 76.2–80.1 MiB (median 77.5)**: about 1.5 MiB more at
+the median, within the 2–5 MiB spread between two runs of the same
+server. The tool's own code, the PostgreSQL client and the SDK's modules
+add about 4 MiB once loaded; `hono/tiny` and a minified server take back
+about 2.5 of them. After a burst of
 pages macOS keeps the high-water mark (130 MiB after 30 pages, the starter
 82): the heap itself falls back to 14 MiB after a collection; the first
 time formatted in a member's zone maps about 8 MiB of the runtime's time

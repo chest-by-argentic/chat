@@ -5,6 +5,7 @@ import * as members from "@argentic/chest-sdk/members";
 import { db } from "./db.js";
 import { reconcile } from "./conversations.js";
 import { uploadFolder } from "./messages.js";
+import { refreshBadges } from "./notify.js";
 
 // What the Chest calls the tool for by itself, signed: the members'
 // lifecycle (POST /chest-events) and the nightly tidy (POST
@@ -27,7 +28,12 @@ export function memberEvent(request: Request): Promise<number> {
     // saved items and places go; others' messages keep only their id.
     "member.erased": async e => {
       const id = e.data.id;
-      await db().begin(async sql => {
+      const touched = await db().begin(async sql => {
+        // The conversations it touches, locked first and in order, as posts
+        // lock them: no deadlock with a member writing there.
+        const conversations = (await sql<{ id: number }[]>`
+          select id from conversations where id in (select conversation_id from messages where author = ${id}) or created_by = ${id}
+          order by id for update`).map(r => r.id);
         // Their messages others replied to stay as "deleted"; the rest go.
         await sql`update messages set body = '', deleted_at = now(), mentions = '{}', mention_all = false, mention_here = false,
           has_files = false, pinned_at = null, pinned_by = null where author = ${id} and kind = 'message' and thread_id is null and reply_count > 0`;
@@ -48,7 +54,13 @@ export function memberEvent(request: Request): Promise<number> {
           await sql`delete from ${sql(table)} where member_id = ${id}`;
         }
         await sql`update conversations set created_by = null where created_by = ${id}`;
+        if (conversations.length) await sql`update conversations c set last_message_id = coalesce(m.id, 0), last_message_at = m.at
+          from (select x.id as conversation, max(m.id) as id, max(m.created_at) as at from unnest(${conversations}::bigint[]) x(id)
+            left join messages m on m.conversation_id = x.id and m.thread_id is null and m.kind = 'message' group by x.id) m
+          where c.id = m.conversation`;
+        return conversations.length ? (await sql<{ member_id: string }[]>`select distinct member_id from conversation_members where conversation_id = any(${conversations}::bigint[])`).map(r => r.member_id) : [];
       });
+      refreshBadges(touched);
       // Their files, sent or not, are all in their own folder: the
       // erasure is acknowledged once it is empty (a failure leaves the
       // event to be delivered again).

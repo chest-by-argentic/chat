@@ -3,6 +3,7 @@ import * as files from "@argentic/chest-sdk/files";
 import type { Draft, FileInfo, Message, Page, Thread, ThreadSummary } from "../shared/types.js";
 import { isEmoji, maxFiles, maxText, pageSize } from "../shared/rules.js";
 import { mentions as mentionsOf } from "../shared/markdown.js";
+import type postgres from "postgres";
 import { db, type Sql } from "./db.js";
 import { Problem, forbidden, invalid, notFound } from "./problem.js";
 import { context, open, seal } from "./sealing.js";
@@ -148,10 +149,6 @@ export async function post(request: Request, who: Member, conversation: number, 
   if (input.files.length > maxFiles) throw invalid("too_many_files");
   const sql = db();
   const a = await writable(sql, who, conversation);
-  if (input.thread !== null) {
-    const root = await rowOf(sql, input.thread);
-    if (root.conversation_id !== conversation || root.thread_id !== null || root.kind !== "message") throw invalid("invalid_thread");
-  }
   // Files: the member's own uploads, as the Chest kept them.
   const folder = uploadFolder(who.id);
   const kept = await Promise.all(input.files.map(async f => {
@@ -171,13 +168,40 @@ export async function post(request: Request, who: Member, conversation: number, 
   if (here) for (const id of (await live.active()).active) if (members.has(id)) people.add(id);
   people.delete(who.id);
   const mentioned = [...people];
-  const row = await sql.begin(async tx => {
-    // One writer at a time per conversation: ids are given in the order
-    // messages are committed, which reading, catching up and unread counts
-    // rely on. The body is sealed with the id it gets.
-    await tx`select 1 from conversations where id = ${conversation} for update`;
-    const [{ id }] = await tx<{ id: number }[]>`select nextval(pg_get_serial_sequence('messages', 'id'))::bigint as id` as unknown as [{ id: number }];
-    const sealed = await seal([{ value: text, context: context.message(id) }, ...kept.map(f => ({ value: f.name.trim(), context: context.file(f.object) }))]);
+  const names = kept.length ? await seal(kept.map(f => ({ value: f.name.trim(), context: context.file(f.object) }))) : [];
+  // Ids follow commit order in a conversation (reading, catching up and
+  // unread counts rely on it): the body is sealed with its id before the
+  // transaction, which then only checks, under the conversation's lock
+  // held a few milliseconds, that no later id was written meanwhile — else
+  // it takes a new id.
+  let row: MessageRow | null = null;
+  for (let attempt = 0; !row; attempt++) {
+    const [{ id }] = await sql<{ id: number }[]>`select nextval(pg_get_serial_sequence('messages', 'id'))::bigint as id` as unknown as [{ id: number }];
+    const [body] = await seal([{ value: text, context: context.message(id) }]);
+    row = await sql.begin(async tx => {
+      await tx`set local lock_timeout = '5s'`;
+      const [c] = await tx<{ last_posted_id: number; archived_at: Date | null }[]>`select last_posted_id, archived_at from conversations where id = ${conversation} for update`;
+      if (!c) throw notFound();
+      if (c.archived_at) throw new Problem(409, "archived");
+      if (c.last_posted_id > id) {
+        if (attempt >= 3) throw new Problem(503, "busy");
+        return null;
+      }
+      if (input.thread !== null) {
+        const [root] = await tx<{ thread_id: number | null; kind: string; conversation_id: number }[]>`select thread_id, kind, conversation_id from messages where id = ${input.thread} for share`;
+        if (!root || root.conversation_id !== conversation || root.thread_id !== null || root.kind !== "message") throw invalid("invalid_thread");
+      }
+      await tx`update conversations set last_posted_id = ${id} where id = ${conversation}`;
+      return write(tx, id, body!);
+    });
+  }
+  const done = row;
+  const [shown] = await hydrate(sql, request, who, [done]);
+  later("after a post", () => afterPost(who, a, done));
+  return shown!;
+
+  async function write(tx: postgres.TransactionSql, id: number, body: string): Promise<MessageRow> {
+    const sealed = [body, ...names];
     const [m] = await tx<MessageRow[]>`
       insert into messages (id, conversation_id, thread_id, author, body, mentions, mention_all, mention_here, has_files)
       values (${id}, ${conversation}, ${input.thread}, ${who.id}, ${sealed[0]!}, ${mentioned}::text[], ${everyone}, ${here}, ${kept.length > 0})
@@ -206,10 +230,7 @@ export async function post(request: Request, who: Member, conversation: number, 
     }
     await tx`delete from drafts where member_id = ${who.id} and conversation_id = ${conversation} and thread_id = ${input.thread ?? 0}`;
     return m!;
-  });
-  const [shown] = await hydrate(sql, request, who, [row]);
-  later("after a post", () => afterPost(who, a, row));
-  return shown!;
+  }
 }
 
 // edit changes the text of a member's own message. Its mentions follow the
@@ -237,7 +258,8 @@ export async function edit(request: Request, who: Member, id: number, raw: strin
     const [u] = await tx<MessageRow[]>`
       update messages set body = ${sealed!}, edited_at = now(), mentions = ${[...people]}::text[],
         mention_all = ${row.mention_all && found.channel}, mention_here = ${here}
-      where id = ${id} returning *`;
+      where id = ${id} and deleted_at is null returning *`;
+    if (!u) throw notFound();
     const added = [...people].filter(p => !row.mentions.includes(p));
     if (added.length) await tx`insert into thread_follows (message_id, member_id) select ${row.thread_id ?? id}, p from unnest(${added}::text[]) p
       on conflict (message_id, member_id) do update set following = true`;
@@ -254,7 +276,7 @@ export async function remove(who: Member, id: number): Promise<void> {
   const sql = db();
   const row = await rowOf(sql, id);
   if (row.kind !== "message" || (row.author !== who.id && !who.isAdmin)) throw forbidden();
-  await access(sql, who, row.conversation_id);
+  const a = await access(sql, who, row.conversation_id);
   const objects = await sql.begin(async tx => {
     // Taken with the conversation, as posts are: no reply lands on a root
     // being deleted.
@@ -285,6 +307,8 @@ export async function remove(who: Member, id: number): Promise<void> {
     return gone;
   });
   if (objects.length) later("deleting files", () => Promise.all(objects.map(o => files.delete(o))));
+  // Unread mentions and direct messages it held no longer count.
+  refreshBadges(a.conversation.kind === "direct" ? (await membersOf(sql, row.conversation_id)).map(m => m.member_id) : row.mention_all ? (await membersOf(sql, row.conversation_id)).map(m => m.member_id) : row.mentions);
 }
 
 // react adds or takes back a member's emoji on a message.

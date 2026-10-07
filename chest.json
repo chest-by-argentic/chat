@@ -2,7 +2,7 @@
   "chest": "0.5",
   "name": "chat",
   "title": "Chat",
-  "description": "Channels, direct messages and threads for your team, live, with every message sealed. Files are not sealed yet.",
+  "description": "Channels, direct messages and threads, live. Every message is sealed; who writes where and when is not, nor are files yet.",
   "icon": "chest/icon.svg",
   "capabilities": ["database", "files", "members", "members.groups", "notifications", "realtime", "sealed"],
   "files": { "quota": "10 GiB", "maxObject": "100 MiB" },

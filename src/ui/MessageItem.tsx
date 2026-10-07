@@ -4,7 +4,7 @@ import { quick } from "../shared/emoji.js";
 import { day, size, stamp, time } from "../shared/format.js";
 import { pathOf } from "../shared/route.js";
 import type { Shown } from "./store.js";
-import { nameOf, useActions, useStore, useWords } from "./context.js";
+import { nameOf, useActions, useSnapshot, useStore, useWords } from "./context.js";
 import { Avatar, Icon } from "./bits.js";
 import { Text } from "./Text.js";
 import { Menu, type MenuItem } from "./Menu.js";
@@ -16,6 +16,7 @@ import { Composer } from "./Composer.js";
 export const MessageItem = memo(function MessageItem({ m, grouped, inThread, focused, highlighted }: { m: Shown; grouped: boolean; inThread: boolean; focused: boolean; highlighted: boolean }) {
   const w = useWords();
   const a = useActions();
+  const snapshot = useSnapshot();
   const me = useStore(s => s.me);
   const author = useStore(s => s.people[m.author]);
   const editing = useStore(s => s.editing === m.id);
@@ -48,6 +49,9 @@ export const MessageItem = memo(function MessageItem({ m, grouped, inThread, foc
     press.current = setTimeout(() => setHeld(true), 450);
   };
   const touchEnd = () => clearTimeout(press.current);
+  // The text as it reads, names in place of tokens.
+  const copyable = (text: string) => text.replace(/<(@mbr_[a-z2-7]{26}|#[1-9][0-9]{0,17}|!channel|!here)>/gu, (_, body: string) =>
+    body.startsWith("@") ? `@${nameOf(snapshot().people[body.slice(1)], w)}` : body.startsWith("#") ? `#${snapshot().conversations.find(c => c.id === Number(body.slice(1)))?.name ?? ""}` : `@${body.slice(1)}`);
   const mentionsMe = !own && (m.mentions.includes(me.id) || m.mentionAll);
 
   return (
@@ -117,7 +121,7 @@ export const MessageItem = memo(function MessageItem({ m, grouped, inThread, foc
             ...(writable ? [{ label: w.react, icon: "smile" as const, run: () => setPicking(true) }] : []),
             ...(thread ? [{ label: w.replyInThread, icon: "reply" as const, run: thread }] : []),
             { label: m.saved ? w.removeFromSaved : w.saveForLater, icon: "bookmark" as const, run: save },
-            ...(m.text ? [{ label: w.copyText, icon: "copy" as const, run: () => { void navigator.clipboard?.writeText(m.text ?? "").then(() => a.toast(w.textCopied)); } }] : []),
+            ...(m.text ? [{ label: w.copyText, icon: "copy" as const, run: () => { void navigator.clipboard?.writeText(copyable(m.text ?? "")).then(() => a.toast(w.textCopied)); } }] : []),
             ...more,
           ]} />
       ) : null}
