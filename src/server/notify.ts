@@ -30,7 +30,6 @@ export async function afterPost(author: Member, a: Access, m: MessageRow, text: 
     select member_id from thread_follows where message_id = ${m.thread_id} and following`).map(r => r.member_id).filter(id => inside.has(id)));
   const mentioned = new Set(m.mentions);
   const mention = (id: string) => mentioned.has(id) || m.mention_all;
-  live.later.activity(members.map(r => r.member_id), { c: c.id, m: m.id, t: m.thread_id, a: author.id, mentions: m.mentions, all: m.mention_all, here: m.mention_here });
   if (m.thread_id !== null) live.later.thread(followers, { c: c.id, t: m.thread_id, m: m.id, a: author.id });
 
   // Who wants to know: their setting, mentions, the threads they follow.
@@ -42,9 +41,10 @@ export async function afterPost(author: Member, a: Access, m: MessageRow, text: 
     return level === "all" || mention(id);
   };
   const candidates = members.filter(r => wants(r.member_id, r.notify)).map(r => r.member_id);
-  // A member who is looking at Chat sees it come: no notice.
-  const { active } = candidates.length ? await live.active() : { active: new Set<string>() };
-  const away = candidates.filter(id => !active.has(id));
+  // A member watching this conversation sees it come: no notice. Anyone
+  // else — Chat closed, hidden, or on another conversation — is notified.
+  const { watching } = await live.online(candidates, c.id);
+  const away = candidates.filter(id => !watching.has(id));
   if (away.length) {
     const named = away.filter(mention);
     const others = away.filter(id => !mention(id));

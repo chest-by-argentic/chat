@@ -14,8 +14,10 @@ contract it is written against.
   is sealed with its row's context (`src/server/sealing.ts`) and is never
   logged nor sent live. Notices carry a preview (`src/server/preview.ts`)
   except in a confidential channel.
-- **Live**: the page takes feed and lifecycle events only without a sender
-  (`src/ui/store.ts`, `follow`); members' sends carry `typing` only.
+- **Live** (`src/ui/store.ts`, `sync`): the page joins every conversation
+  of its member and focuses the one shown; feeds and the Chest's events
+  come through `on` and `onJoined`/`onResync`/`onKicked`/`onRefused`,
+  members' messages through `peers` — `typing` only.
 - **No inline style or script**: the page's policy forbids them; use
   classes, or set sizes through the CSSOM in an effect.
 - **Migrations** only add: a migration that ran is never changed.

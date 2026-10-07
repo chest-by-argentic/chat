@@ -1,8 +1,8 @@
 // The local Chest of the tool's tests: a real PostgreSQL (a disposable
 // container), the SDK's fake Chest (members, groups, files, notifications,
-// sealing, realtime), the Chest's realtime triggers installed on the
-// tables chest.json names — the same plpgsql the Chest
-// installs —, and a front that plays the Chest's:
+// sealing, realtime), triggers that tell it each row committed to the
+// tables chest.json names, as the Chest's own do, and a front that plays
+// the Chest's:
 // it asserts the member of a cookie on every request, relays the page's
 // live connection and the file links and uploads to the fake Chest.
 //
@@ -21,66 +21,27 @@ import { connect as netConnect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
-import * as realtime from "@argentic/chest-sdk/realtime";
 import { fakeChest, withMember } from "@argentic/chest-sdk/testing";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(join(root, "chest.json"), "utf8"));
 const image = "postgres:17";
 
-// The Chest's trigger function, as the Chest installs it in a tool's database.
-const realtimeFunction = `CREATE OR REPLACE FUNCTION chest_realtime.notify() RETURNS trigger LANGUAGE plpgsql AS $chest$
-DECLARE
-  rec jsonb; prior jsonb; payload jsonb; suffix text := '';
-BEGIN
-  IF TG_ARGV[0] = 'm' THEN
-    prior := to_jsonb(OLD);
-    IF TG_OP = 'UPDATE' THEN
-      rec := to_jsonb(NEW);
-      IF rec->TG_ARGV[1] IS NOT DISTINCT FROM prior->TG_ARGV[1] AND rec->TG_ARGV[2] IS NOT DISTINCT FROM prior->TG_ARGV[2] THEN RETURN NULL; END IF;
-    END IF;
-    IF prior->>TG_ARGV[1] IS NOT NULL AND prior->>TG_ARGV[2] IS NOT NULL THEN
-      PERFORM pg_notify('chest_realtime', jsonb_build_object('k', 'm', 't', TG_TABLE_NAME, 'key', prior->>TG_ARGV[1], 'm', prior->>TG_ARGV[2])::text);
-    END IF;
-    RETURN NULL;
-  END IF;
-  IF TG_OP = 'DELETE' THEN rec := to_jsonb(OLD); ELSE rec := to_jsonb(NEW); END IF;
-  IF TG_ARGV[2] <> '' THEN
-    suffix := rec->>TG_ARGV[2];
-    IF suffix IS NULL THEN RETURN NULL; END IF;
-  END IF;
-  payload := jsonb_build_object('k', 'f', 'c', TG_ARGV[1] || suffix, 'e', TG_TABLE_NAME || '.' || lower(TG_OP),
-    'r', (SELECT coalesce(jsonb_object_agg(col, rec->col), '{}'::jsonb) FROM unnest(TG_ARGV[3:TG_NARGS - 1]) AS col));
-  IF octet_length(payload::text) > 7000 THEN
-    payload := payload || jsonb_build_object('r', jsonb_build_object(TG_ARGV[3], rec->TG_ARGV[3]), 'p', true);
-  END IF;
-  PERFORM pg_notify('chest_realtime', payload::text);
-  RETURN NULL;
-END
-$chest$`;
-
-const lit = s => `'${s}'`;
-function realtimeStatements(rules) {
-  const out = ["CREATE SCHEMA IF NOT EXISTS chest_realtime", realtimeFunction];
-  rules.feeds.forEach((f, i) => {
-    const at = f.channel.lastIndexOf(":");
-    const last = f.channel.slice(at + 1);
-    const [prefix, column] = /^\{[a-z_][a-z0-9_]*\}$/u.test(last) ? [f.channel.slice(0, at + 1), last.slice(1, -1)] : [f.channel, ""];
-    out.push(`CREATE TRIGGER chest_realtime_f${i} AFTER INSERT OR UPDATE OR DELETE ON ${f.table} FOR EACH ROW EXECUTE FUNCTION chest_realtime.notify('f', ${lit(prefix)}, ${lit(column)}, ${f.columns.map(lit).join(", ")})`);
-  });
-  const seen = new Set();
-  for (const c of rules.channels) {
-    if (!c.join || Array.isArray(c.join) || seen.has(c.join.table)) continue;
-    seen.add(c.join.table);
-    out.push(`CREATE TRIGGER chest_realtime_m${seen.size - 1} AFTER UPDATE OR DELETE ON ${c.join.table} FOR EACH ROW EXECUTE FUNCTION chest_realtime.notify('m', ${lit(c.join.key)}, ${lit(c.join.member)})`);
-    // The harness's own: which rows exist, for the fake Chest's join checks
-    // (the Chest asks the database; the fake asks a function).
-    out.push(`CREATE OR REPLACE FUNCTION chest_realtime.harness_rows() RETURNS trigger LANGUAGE plpgsql AS $local$ BEGIN
-      PERFORM pg_notify('harness_rows', jsonb_build_object('op', TG_OP, 'new', CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END, 'old', CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END)::text);
-      RETURN NULL; END $local$`);
-    out.push(`CREATE TRIGGER harness_rows AFTER INSERT OR UPDATE OR DELETE ON ${c.join.table} FOR EACH ROW EXECUTE FUNCTION chest_realtime.harness_rows()`);
-  }
-  return out;
+// The harness's triggers: each committed row of a table chest.json names
+// — a feed's or a membership table's — told whole (sealed bodies left out —
+// a notice carries 8 KB at most) at commit, for the fake Chest to play the
+// Chest's own triggers (commit, removed) and to answer joins.
+const tables = rules => [...new Set([...rules.feeds.map(f => f.table), ...rules.channels.filter(c => c.join && !Array.isArray(c.join)).map(c => c.join.table)])];
+function harnessStatements(rules) {
+  return [
+    "CREATE SCHEMA IF NOT EXISTS chest_harness",
+    `CREATE OR REPLACE FUNCTION chest_harness.notify() RETURNS trigger LANGUAGE plpgsql AS $harness$ BEGIN
+      PERFORM pg_notify('chest_harness', jsonb_build_object('t', TG_TABLE_NAME, 'op', lower(TG_OP),
+        'new', CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) - 'body' END,
+        'old', CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) - 'body' END)::text);
+      RETURN NULL; END $harness$`,
+    ...tables(rules).map(t => `CREATE TRIGGER chest_harness AFTER INSERT OR UPDATE OR DELETE ON ${t} FOR EACH ROW EXECUTE FUNCTION chest_harness.notify()`),
+  ];
 }
 
 // database starts a disposable PostgreSQL, plays the migrations as the Chest
@@ -113,7 +74,7 @@ export async function database() {
   for (const file of readdirSync(dir).filter(f => /^\d{4}_.+\.sql$/u.test(f)).sort()) {
     await sql.begin(tx => tx.unsafe(readFileSync(join(dir, file), "utf8")));
   }
-  for (const statement of realtimeStatements(manifest.realtime)) await sql.unsafe(statement);
+  for (const statement of harnessStatements(manifest.realtime)) await sql.unsafe(statement);
   return { url, sql, stop };
 }
 
@@ -130,20 +91,22 @@ export async function startChest({ members, groups = [], chest = {} } = {}) {
     realtime: { channels: manifest.realtime.channels, feeds: manifest.realtime.feeds, membership: (table, key, member) => rows.has(`${key}:${member}`) },
     chest: { organization: "Acme SAS", timeZone: "Europe/Paris", language: "en", ...chest },
   });
+  // Rows committed: a membership row gone (or moved) takes its member out,
+  // a feed's row goes to the fake Chest as the Chest's triggers tell it.
+  const membership = manifest.realtime.channels.find(c => c.join && !Array.isArray(c.join))?.join;
+  const feeds = new Set(manifest.realtime.feeds.map(f => f.table));
   const listener = postgres(db.url, { max: 1, onnotice: () => {} });
-  await listener.listen("harness_rows", text => {
+  await listener.listen("chest_harness", text => {
     const n = JSON.parse(text);
-    if (n.old) rows.delete(`${n.old.conversation_id}:${n.old.member_id}`);
-    if (n.new) rows.add(`${n.new.conversation_id}:${n.new.member_id}`);
-  });
-  // What the Chest's triggers say goes to the fake Chest's hub: a row
-  // removed from a membership table, a feed's row on the channel the
-  // trigger named (the fake's own commit() would read the channel from the
-  // carried columns, which need not hold it).
-  await listener.listen("chest_realtime", text => {
-    const n = JSON.parse(text);
-    if (n.k === "m") fake.realtime.removed(n.t, n.key, n.m);
-    else realtime.publish(n.c, n.e, n.r).catch(() => { /* at most once, as the Chest */ });
+    if (membership && n.t === membership.table) {
+      const key = r => `${r[membership.key]}:${r[membership.member]}`;
+      if (n.old && (!n.new || key(n.old) !== key(n.new))) {
+        rows.delete(key(n.old));
+        fake.realtime.removed(n.t, String(n.old[membership.key]), n.old[membership.member]);
+      }
+      if (n.new) rows.add(key(n.new));
+    }
+    if (feeds.has(n.t)) fake.realtime.commit(n.t, n.op, n.new ?? n.old);
   });
 
   const { app, settled, closeDb } = await import(join(root, "dist", "test", "app.js"));

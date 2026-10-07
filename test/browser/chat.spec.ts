@@ -63,6 +63,12 @@ test("two members talk live: typing, a message, a reaction, a thread", async ({ 
   await expect(b.page.locator("article", { hasText: "Shipping the tiles" }).getByRole("button", { name: /1 reply/u })).toBeVisible();
   await shot(a.page, "desktop-light-en-thread");
   await axe(a.page, "thread");
+
+  // Sam writes elsewhere, mentioning Camille: her sidebar counts it at once.
+  await b.page.evaluate(async ([general, camilleId]) => {
+    await fetch(`/chest/api/conversations/${general}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: `Lunch? <@${camilleId}>` }) });
+  }, [seeded.general, camille.id] as const);
+  await expect(a.page.getByRole("link", { name: /^general, .*1 mention/u })).toBeVisible();
   await a.context.close();
   await b.context.close();
 });

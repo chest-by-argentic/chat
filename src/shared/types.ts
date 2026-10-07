@@ -149,7 +149,6 @@ export type Initial = {
 };
 
 // The direct events the tool sends a member's pages (realtime.send).
-export type Activity = { c: number; m: number; t: number | null; a: string; mentions: string[]; all: boolean; here: boolean };
 export type ReadEvent = { c: number; m: number; t: number | null };
 // A reply in a thread the member follows.
 export type ThreadEvent = { c: number; t: number; m: number; a: string };

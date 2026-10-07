@@ -20,7 +20,8 @@ sealed by the Chest.
   nobody writes.
 - **Notifications** in the Chest's bell, by push and by mail, as each
   member chooses there: per conversation *All new messages*, *Mentions* or
-  *Nothing*; only when you are not looking at Chat; withdrawn once read.
+  *Nothing*; only when you are not watching that conversation (Chat
+  closed, hidden, or open on another one); withdrawn once read.
   **Badges** count unread direct messages and mentions.
 - **Keyboard** (`⌘/Ctrl K` to jump anywhere, `⌘/Ctrl /` for the list),
   **phone** layout, **light and dark**, **English and French**,
@@ -104,19 +105,21 @@ person, another in a second browser to talk to yourself.
   transaction, which checks under the conversation's lock that no later id
   was written (else it takes a new one): ids follow commit order.
 - **Live.** Each page tracks its presence on `everyone` (active, or away
-  when hidden) and joins `c:<id>` for the conversation it shows; the Chest
-  lets in only members listed in `conversation_members`. Feeds of
-  `messages` and `reactions` carry ids and times, never words: the page
-  asks the tool for what changed, opened for its member. Members' own sends
-  carry only `typing`. Everything else (unread counts, threads, reads on
-  another device, conversations added) comes as direct events to the
-  members concerned.
+  when hidden), joins `c:<id>` for every conversation its member is in —
+  the Chest lets in only members listed in `conversation_members` — and
+  tells the Chest which one is on screen (`focus`). Feeds of `messages`
+  (ids, author, times, mentions) and `reactions` move the sidebar's counts
+  and the page shown; they never carry words: the page asks the tool for
+  what changed, opened for its member. Members' own messages on a channel
+  (`peers`) carry only `typing`. What no feed says — a reply in a thread
+  you follow, a read on another device, your conversations changed — comes
+  as a direct event to the members concerned.
 - **Search.** Sealed text has no index. A search narrows in clear (what
   you may read, filters), then opens messages newest first and keeps those
   holding every word; it stops at 20 results or after 5,000 messages, 16 MB
   or 2 seconds, and says how far back it looked.
 - **Notifications** go to members whose setting asks for them and who are
-  not active in Chat; the notice's title says who and where, its body the
+  not watching the conversation (`realtime.online(…, {channel})`); the notice's title says who and where, its body the
   message's first words, or nothing of them in a confidential channel.
 
 ## Test

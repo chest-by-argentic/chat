@@ -1,5 +1,5 @@
 import { connect, type Channel, type Live } from "@argentic/chest-sdk/realtime/client";
-import type { Activity, Conversation, Details, FileInfo, Initial, Me, Message, Person, ReadEvent, Route, SearchResult, Sidebar, Thread, ThreadEvent, ThreadSummary } from "../shared/types.js";
+import type { Conversation, Details, FileInfo, Initial, Me, Message, Person, ReadEvent, Route, SearchResult, Sidebar, Thread, ThreadEvent, ThreadSummary } from "../shared/types.js";
 import { pathOf, routeOf } from "../shared/route.js";
 import { typingEvery, typingFor } from "../shared/rules.js";
 import { ApiError, del, get, patch, post, put } from "./api.js";
@@ -84,7 +84,10 @@ export function createStore(initial: Initial) {
   let state = first(initial);
   const listeners = new Set<() => void>();
   const set = (change: Partial<ViewState> | ((s: ViewState) => Partial<ViewState>)) => {
+    const before = state;
     state = { ...state, ...(typeof change === "function" ? change(state) : change) };
+    // The live channels follow the member's conversations and the one shown.
+    if (state.conversations !== before.conversations || state.viewing?.id !== before.viewing?.id || state.viewing?.joined !== before.viewing?.joined) queueMicrotask(() => sync());
     for (const l of [...listeners]) l();
   };
   const subscribe = (l: () => void) => {
@@ -94,7 +97,6 @@ export function createStore(initial: Initial) {
 
   let live: Live | undefined;
   let everyone: Channel | undefined;
-  let current: { id: number; channel: Channel; off: (() => void)[] } | undefined;
   let toastId = 0;
   // A draft is kept once the member pauses: its timer per conversation and
   // thread.
@@ -213,56 +215,97 @@ export function createStore(initial: Initial) {
         const lost = s.viewing && s.viewing.kind !== "public" && !sidebar.conversations.some(c => c.id === s.viewing!.id);
         return { conversations: sidebar.conversations, people: { ...s.people, ...Object.fromEntries(sidebar.people.map(p => [p.id, p])) }, threadsUnread: sidebar.threadsUnread, viewing: lost ? null : viewing, missing: s.missing || !!lost };
       });
-      if (state.viewing && state.viewing.joined && current?.id !== state.viewing.id) follow(state.viewing.id);
     } catch { /* the next event tries again */ }
   };
 
-  // The live channel of the conversation shown: its feeds and typing.
-  const follow = (id: number | null) => {
-    if (current && current.id !== id) {
-      current.off.forEach(f => f());
-      current.channel.leave();
-      current = undefined;
-    }
-    if (!live || id === null || current) return;
-    const channel = live.channel(`c:${id}`);
-    // The Chest's events (feeds, kicked) come without a sender; members'
-    // sends come with one. A member could send an event of any name on the
-    // channel: only typing is taken from a member, the rest only from the
-    // Chest.
-    const chest = (listener: (payload: unknown) => void) => (payload: unknown, from: string | undefined) => { if (from === undefined) listener(payload); };
+  // The live channels: one per conversation the member is in — its feeds
+  // move the sidebar's counts everywhere, and the page of the one shown —,
+  // and the focus, the conversation on screen, which the tool reads to
+  // notify only those not watching it.
+  const joined = new Map<number, { channel: Channel; off: (() => void)[] }>();
+  const sync = () => {
+    if (!live) return;
+    const wanted = new Set(state.conversations.filter(c => c.joined && !c.archived).map(c => c.id));
+    for (const [id, j] of joined) if (!wanted.has(id)) part(id, j);
+    for (const id of wanted) if (!joined.has(id)) enter(id);
+    const shown = state.viewing?.joined && joined.has(state.viewing.id) ? state.viewing.id : null;
+    live.focus(shown === null ? null : `c:${shown}`);
+  };
+  const part = (id: number, j: { channel: Channel; off: (() => void)[] }) => {
+    j.off.forEach(f => f());
+    j.channel.leave();
+    joined.delete(id);
+  };
+  const shownHere = (id: number) => state.viewing?.id === id;
+  const enter = (id: number) => {
+    const channel = live!.channel(`c:${id}`);
     const row = (p: unknown) => (p !== null && typeof p === "object" ? p as Record<string, unknown> : {});
-    const idOf = (p: unknown) => (typeof row(p)["id"] === "number" ? row(p)["id"] as number : null);
-    const reaction = (on: boolean) => chest(p => {
+    const num = (v: unknown) => (typeof v === "number" ? v : null);
+    const reaction = (on: boolean) => (p: unknown) => {
       const r = row(p);
-      if (typeof r["message_id"] !== "number" || typeof r["emoji"] !== "string" || typeof r["member_id"] !== "string") return;
+      if (!shownHere(id) || typeof r["message_id"] !== "number" || typeof r["emoji"] !== "string" || typeof r["member_id"] !== "string") return;
       ensurePeople([r["member_id"]]);
       reactLocally(r["message_id"], r["emoji"], r["member_id"], on);
-    });
+    };
     const off = [
-      channel.on("joined", ({ replayed }) => { if (!replayed) void catchUp(id); }),
-      channel.on("resync", () => void catchUp(id)),
-      channel.on("messages.insert", chest(p => { const m = idOf(p); if (m) queueFetch(m); })),
-      channel.on("messages.update", chest(p => { const m = idOf(p); if (m) queueFetch(m); })),
-      channel.on("messages.delete", chest(p => { const m = idOf(p); if (m) dropMessage(m); })),
+      // A message written: the counts of the sidebar, and the page if shown.
+      channel.on("messages.insert", p => {
+        const r = row(p), m = num(r["id"]);
+        if (m === null) return;
+        if (r["kind"] === "message") counted(id, m, r);
+        if (shownHere(id)) queueFetch(m);
+      }),
+      channel.on("messages.update", p => { const m = num(row(p)["id"]); if (m !== null && shownHere(id)) queueFetch(m); }),
+      channel.on("messages.delete", p => {
+        const m = num(row(p)["id"]);
+        if (m === null) return;
+        if (shownHere(id)) dropMessage(m);
+        laterSidebar();
+      }),
       channel.on("reactions.insert", reaction(true)),
       channel.on("reactions.delete", reaction(false)),
-      channel.on("typing", (p, from) => {
-        if (!from || from === state.me.id) return;
-        const thread = typeof (p as { t?: unknown })?.t === "number" ? (p as { t: number }).t : null;
+      // Members' own messages are only ever typing.
+      channel.peers.on("typing", (p, from) => {
+        if (from === state.me.id) return;
+        const thread = num(row(p)["t"]);
         set(s => ({ typing: [...s.typing.filter(t => !(t.member === from && t.conversation === id)), { conversation: id, thread, member: from, until: Date.now() + typingFor }] }));
         ensurePeople([from]);
       }),
-      // Taken out (or never let in): no live channel any more; the sidebar
-      // says what the member still has.
-      channel.on("kicked", () => { follow(null); void refreshSidebar(); }),
-      channel.on("refused", code => {
-        follow(null);
+      channel.onJoined(({ replayed }) => {
+        if (replayed) return;
+        laterSidebar();
+        if (shownHere(id)) void catchUp(id);
+      }),
+      channel.onResync(() => {
+        laterSidebar();
+        if (shownHere(id)) void catchUp(id);
+      }),
+      // Taken out (or not let in): the sidebar says what the member still
+      // has; a join refused for a while is tried again later.
+      channel.onKicked(() => { part(id, joined.get(id)!); void refreshSidebar(); }),
+      channel.onRefused(code => {
+        part(id, joined.get(id)!);
         if (code === "forbidden") void refreshSidebar();
-        else setTimeout(() => { if (state.viewing?.id === id && state.viewing.joined && !current) follow(id); }, 5000);
+        else setTimeout(sync, 5000);
       }),
     ];
-    current = { id, channel, off };
+    joined.set(id, { channel, off });
+  };
+  // counted moves a conversation's counts for a message written there.
+  const counted = (id: number, m: number, r: Record<string, unknown>) => {
+    const mine = r["author"] === state.me.id;
+    const top = r["thread_id"] === null;
+    const mentions = Array.isArray(r["mentions"]) ? r["mentions"] as unknown[] : [];
+    const named = !mine && (mentions.includes(state.me.id) || r["mention_all"] === true);
+    updateConversation(id, c => {
+      if (!top) return named ? { ...c, mentions: c.mentions + 1 } : c;
+      const at = typeof r["created_at"] === "string" ? r["created_at"] : new Date().toISOString();
+      const latest = { lastMessageId: Math.max(c.lastMessageId, m), lastMessageAt: at };
+      if (mine) return { ...c, ...latest, lastRead: Math.max(c.lastRead, m), unread: 0, mentions: 0 };
+      if (m <= c.lastRead) return { ...c, ...latest };
+      return { ...c, ...latest, unread: Math.min(c.unread + 1, 100), mentions: c.mentions + (named ? 1 : 0) };
+    });
+    if (state.list?.view === "mentions" && named) void loadList("mentions");
   };
 
   // catchUp sets right what live events may have missed (they come at
@@ -330,18 +373,7 @@ export function createStore(initial: Initial) {
 
   // Direct events: the member's own.
   const direct = (event: string, payload: unknown) => {
-    if (event === "activity") {
-      const a = payload as Activity;
-      const c = state.conversations.find(x => x.id === a.c);
-      if (!c) return void refreshSidebar();
-      const mine = a.a === state.me.id;
-      const named = a.mentions.includes(state.me.id) || a.all;
-      updateConversation(a.c, x => a.t === null
-        ? mine ? { ...x, lastMessageId: a.m, lastMessageAt: new Date().toISOString(), unread: 0, mentions: 0, lastRead: a.m }
-          : { ...x, lastMessageId: a.m, lastMessageAt: new Date().toISOString(), unread: a.m > x.lastRead ? Math.min(x.unread + 1, 100) : x.unread, mentions: x.mentions + (named && a.m > x.lastRead ? 1 : 0) }
-        : { ...x, mentions: x.mentions + (named && !mine ? 1 : 0) });
-      if (state.list?.view === "mentions" && named && !mine) void loadList("mentions");
-    } else if (event === "thread") {
+    if (event === "thread") {
       const t = payload as ThreadEvent;
       if (t.a !== state.me.id) laterSidebar();
       if (state.list?.view === "threads") void loadList("threads");
@@ -383,7 +415,7 @@ export function createStore(initial: Initial) {
     });
     live.on("closed", reason => set({ connection: reason }));
     live.on("direct", direct);
-    if (state.viewing?.joined) follow(state.viewing.id);
+    sync();
     window.addEventListener("popstate", () => {
       const route = routeOf(location.pathname, new URLSearchParams(location.search));
       if (route) void go(route, { history: false });
@@ -412,7 +444,6 @@ export function createStore(initial: Initial) {
       if (!sameConversation) {
         const known = state.conversations.find(c => c.id === route.id) ?? null;
         set({ viewing: known, page: known ? { conversation: route.id, messages: [], before: false, after: false, loading: true, newLine: newLineOf(known), focus: route.message } : null, missing: false, details: null, pinned: null, thread: null });
-        follow(known?.joined ? route.id : null);
         try {
           const viewing = known ?? await get<Conversation>(`/conversations/${route.id}`);
           if (!known) set({ viewing });
@@ -432,7 +463,6 @@ export function createStore(initial: Initial) {
         await reloadThread(route.thread);
       } else if (!route.thread) set({ thread: null });
     } else {
-      follow(null);
       set({ viewing: null, page: null, thread: null, missing: false });
       if (route.view === "search") {
         if (route.q) void search(route.q);
@@ -706,9 +736,10 @@ export function createStore(initial: Initial) {
       }, 800));
     },
     typing(conversation: number, thread: number | null) {
-      if (!current || current.id !== conversation || Date.now() - lastTyping < typingEvery) return;
+      const j = joined.get(conversation);
+      if (!j || Date.now() - lastTyping < typingEvery) return;
       lastTyping = Date.now();
-      current.channel.send("typing", { t: thread });
+      j.channel.peers.send("typing", { t: thread });
     },
     stopTyping() { lastTyping = 0; },
 
@@ -728,7 +759,6 @@ export function createStore(initial: Initial) {
       try {
         const joined = await post<Conversation>(`/conversations/${id}/join`);
         set(s => ({ conversations: [...s.conversations.filter(c => c.id !== id), joined], viewing: s.viewing?.id === id ? joined : s.viewing }));
-        follow(id);
       } catch (error) { fail(error); }
     },
     async leave(id: number) {

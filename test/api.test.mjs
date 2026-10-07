@@ -121,18 +121,19 @@ test("direct conversations: one per set of people, closed to the others", async 
   assert.deepEqual(notes.people, [robin.id]);
 });
 
-test("mentions notify who is away, with a preview of the message", async () => {
+test("mentions notify whoever is not watching the conversation, with a preview of the message", async () => {
   const c = await channel(camille, "public", { members: [sam.id, hugo.id, lea.id] });
-  // Léa has Chat open in front of her: she sees it come.
-  const page = connect({ url: local.chest.realtime.url(lea.id) });
-  page.channel("everyone").presence.track({ away: false });
-  await waitFor(async () => (await presence()).includes(lea.id));
+  // Léa watches the channel: she sees it come. Sam has Chat open, but on
+  // another conversation: he is told.
+  const lea_ = await watch(lea, c.id);
+  const general = (await ok(sam, "GET", "/sidebar")).conversations.find(x => x.name === "general");
+  const sam_ = await watch(sam, general.id);
   const before = local.chest.notifications.length;
   const sent = await say(camille, c.id, `Budget numbers for <@${sam.id}> <@${lea.id}> and <@${robin.id}>`);
   await settled();
   const items = local.chest.notifications.slice(before);
   const toSam = items.find(i => i.member === sam.id);
-  assert.ok(toSam, "Sam, away, is notified");
+  assert.ok(toSam, "Sam, on another conversation, is notified");
   assert.equal(toSam.title, `Camille Martin mentioned you in #${c.name}`);
   assert.equal(toSam.body, "Budget numbers for @Sam Taylor @Léa Dubois and @Robin Lee", "the words as they read, names in place of tokens");
   assert.equal(toSam.key, `c:${c.id}`);
@@ -142,19 +143,16 @@ test("mentions notify who is away, with a preview of the message", async () => {
   assert.ok(!items.some(i => [i.member].includes(hugo.id)), "Hugo, not mentioned, is on Mentions for channels");
   const hugoItem = local.chest.notifications.find(i => [i.member].includes(hugo.id) && i.title?.includes("dans"));
   assert.equal(hugoItem, undefined);
-  page.close();
+  lea_.close();
+  sam_.close();
 });
 
-test("a mention reaches only the conversation's members; @here, those active now", async () => {
+test("a mention reaches only the conversation's members; @here, those with Chat open", async () => {
   const c = await channel(camille, "private", { members: [sam.id, lea.id] });
-  const page = connect({ url: local.chest.realtime.url(lea.id) });
-  page.channel("everyone").presence.track({ away: false });
-  const away = connect({ url: local.chest.realtime.url(sam.id) });
-  away.channel("everyone").presence.track({ away: true });
-  await waitFor(async () => (await presence()).includes(lea.id));
+  const page = await watch(lea, c.id);
   const m = await say(camille, c.id, `<!here> and <@${robin.id}>`);
   const [row] = await local.sql`select mentions, mention_here from messages where id = ${m.id}`;
-  assert.deepEqual(row.mentions, [lea.id], "Léa is active; Sam away; Robin outside");
+  assert.deepEqual(row.mentions, [lea.id], "Léa has Chat open; Sam does not; Robin is outside");
   assert.equal(row.mention_here, true);
   assert.equal((await local.sql`select 1 from thread_follows where message_id = ${m.id} and member_id = ${robin.id}`).length, 0);
   // An edit may take @here out, not bring anyone in.
@@ -162,7 +160,6 @@ test("a mention reaches only the conversation's members; @here, those active now
   const [edited] = await local.sql`select mentions, mention_all, mention_here from messages where id = ${m.id}`;
   assert.deepEqual(edited, { mentions: [], mention_all: false, mention_here: false });
   page.close();
-  away.close();
 });
 
 test("threads page their replies; reading only goes forward", async () => {
@@ -327,16 +324,16 @@ test("a feed carries ids and times to the channel's members, never the words", a
   const heard = [];
   const room = page.channel(`c:${c.id}`);
   room.on("messages.insert", p => heard.push(p));
-  await new Promise(resolve => room.on("joined", resolve));
+  await new Promise(resolve => room.onJoined(resolve));
   const outsider = connect({ url: local.chest.realtime.url(robin.id) });
-  const refused = await new Promise(resolve => outsider.channel(`c:${c.id}`).on("refused", resolve));
+  const refused = await new Promise(resolve => outsider.channel(`c:${c.id}`).onRefused(resolve));
   assert.equal(refused, "forbidden", "Robin may not join");
   await say(camille, c.id, "live words");
   await waitFor(() => heard.length > 0);
-  assert.deepEqual(Object.keys(heard[0]).sort(), ["author", "conversation_id", "created_at", "deleted_at", "edited_at", "id", "kind", "last_reply_at", "pinned_at", "reply_count", "thread_id"]);
+  assert.deepEqual(Object.keys(heard[0]).sort(), ["author", "conversation_id", "created_at", "deleted_at", "edited_at", "id", "kind", "last_reply_at", "mention_all", "mentions", "pinned_at", "reply_count", "thread_id"]);
   assert.ok(!JSON.stringify(heard).includes("live words"));
   // Taken out of the channel, Sam is taken out of its live channel at once.
-  const kicked = new Promise(resolve => room.on("kicked", resolve));
+  const kicked = new Promise(resolve => room.onKicked(resolve));
   await ok(camille, "DELETE", `/conversations/${c.id}/members/${sam.id}`);
   await kicked;
   page.close();
@@ -351,11 +348,11 @@ test("groups give channels: joining, leaving the group follow at once", async ()
   // Léa leaves the group: the Chest says so, she leaves the channel.
   local.chest.members.find(m => m.id === lea.id).groups = [];
   design.members = design.members.filter(m => m !== lea.id);
-  assert.equal(await local.chest.emit({ type: "member.updated", data: { id: lea.id, changed: ["groups"] } }, local.url), 204);
+  assert.equal(await local.chest.deliver({ type: "member.updated", data: { id: lea.id, changed: ["groups"] } }, local.url), 204);
   assert.equal((await call(lea, "GET", `/conversations/${c.id}/messages`)).status, 404);
   // Someone added in person stays.
   await ok(robin, "POST", `/conversations/${c.id}/members`, { members: [lea.id] });
-  assert.equal(await local.chest.emit({ type: "member.updated", data: { id: lea.id, changed: ["groups"] } }, local.url), 204);
+  assert.equal(await local.chest.deliver({ type: "member.updated", data: { id: lea.id, changed: ["groups"] } }, local.url), 204);
   assert.equal((await call(lea, "GET", `/conversations/${c.id}/messages`)).status, 200);
 });
 
@@ -414,7 +411,7 @@ test("erasure: the person's words, files and places go; the Chest is told", asyn
   const up = await ok(hugo, "POST", "/uploads", { conversation: c.id, size: 4 });
   assert.equal((await fetch(local.url + up.url, { method: "PUT", body: "lost", headers: { "content-type": "text/plain", cookie: `member=${hugo.id}` } })).status, 201);
   const erasure = "era_" + "a".repeat(26);
-  const status = await local.chest.emit({ type: "member.erased", data: { id: hugo.id, erasure, deadline: new Date(Date.now() + 864e5).toISOString() } }, local.url);
+  const status = await local.chest.deliver({ type: "member.erased", data: { id: hugo.id, erasure, deadline: new Date(Date.now() + 864e5).toISOString() } }, local.url);
   assert.equal(status, 204);
   assert.equal((await local.sql`select 1 from messages where id = ${alone.id}`).length, 0);
   const [kept] = await local.sql`select body, deleted_at from messages where id = ${root.id}`;
@@ -427,9 +424,16 @@ test("erasure: the person's words, files and places go; the Chest is told", asyn
   assert.ok(![...local.chest.files.keys()].some(name => name.startsWith(`u/${hugo.id}/`)), "their uploads, sent or not, are gone");
 });
 
-async function presence() {
+// watch is a member's page with a conversation on screen (its focus), once
+// the Chest knows it.
+async function watch(member, conversation) {
   const realtime = await import("@argentic/chest-sdk/realtime");
-  return (await realtime.presence("everyone")).members.filter(m => m.state.away === false).map(m => m.id);
+  const page = connect({ url: local.chest.realtime.url(member.id) });
+  const room = page.channel(`c:${conversation}`);
+  await new Promise(resolve => room.onJoined(resolve));
+  page.focus(`c:${conversation}`);
+  await waitFor(async () => (await realtime.online([member.id], { channel: `c:${conversation}` })).watching.includes(member.id));
+  return page;
 }
 async function waitFor(check, ms = 3000) {
   const end = Date.now() + ms;

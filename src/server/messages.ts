@@ -162,10 +162,10 @@ export async function post(request: Request, who: Member, conversation: number, 
   const everyone = !direct && found.channel;
   const here = !direct && found.here && !everyone;
   // Only the conversation's members are mentioned: a name outside it
-  // reaches nobody (and @here, those of them in front of Chat now).
+  // reaches nobody (and @here, those of them with Chat open now).
   const members = new Set((await membersOf(sql, conversation)).map(m => m.member_id));
   const people = new Set(found.members.filter(id => members.has(id)));
-  if (here) for (const id of (await live.active()).active) if (members.has(id)) people.add(id);
+  if (here) for (const id of (await live.online([...members])).online) people.add(id);
   people.delete(who.id);
   const mentioned = [...people];
   const names = kept.length ? await seal(kept.map(f => ({ value: f.name.trim(), context: context.file(f.object) }))) : [];

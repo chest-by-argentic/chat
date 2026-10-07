@@ -1,13 +1,15 @@
 import * as realtime from "@argentic/chest-sdk/realtime";
-import type { Activity, ReadEvent, ThreadEvent } from "../shared/types.js";
+import type { ReadEvent, ThreadEvent } from "../shared/types.js";
 import { later as after } from "./later.js";
 
-// What the tool tells members' pages directly, beside the feeds of the
-// conversation they show (chest.json): ids and counts, never a member's
-// words. A page that missed one refetches when it comes back.
+// What the tool tells members' pages directly, beside the feeds of their
+// conversations (chest.json): what a feed does not say — a reply in a
+// thread they follow, a read on another device, their list of
+// conversations changed. Ids only, never a member's words; a page that
+// missed one asks again when it comes back.
 
 // The direct events, by name.
-export const events = { activity: "activity", thread: "thread", read: "read", conversations: "conversations" } as const;
+export const events = { thread: "thread", read: "read", conversations: "conversations" } as const;
 
 const send = (ids: Iterable<string>, event: string, payload: unknown) => {
   const to = [...new Set(ids)];
@@ -15,8 +17,6 @@ const send = (ids: Iterable<string>, event: string, payload: unknown) => {
 };
 
 export const later = {
-  // activity: a message was posted where these members are.
-  activity: (ids: Iterable<string>, a: Activity) => send(ids, events.activity, a),
   // thread: a reply in a thread these members follow.
   thread: (ids: Iterable<string>, t: ThreadEvent) => send(ids, events.thread, t),
   // read: the member read up to a message on one of their pages.
@@ -25,12 +25,11 @@ export const later = {
   conversations: (ids: Iterable<string>) => send(ids, events.conversations, {}),
 };
 
-// active lists the members whose page is in front of them now: they see
-// what comes, nobody notifies them.
-export async function active(): Promise<{ active: Set<string>; online: Set<string> }> {
-  const { members } = await realtime.presence("everyone");
-  return {
-    online: new Set(members.map(m => m.id)),
-    active: new Set(members.filter(m => m.state["away"] !== true).map(m => m.id)),
-  };
+// online says which of these members have Chat open, and which of them
+// watch the conversation (a page in front of them, focused on it): those
+// see a message come; the others are notified.
+export async function online(ids: string[], conversation?: number): Promise<{ online: Set<string>; watching: Set<string> }> {
+  if (!ids.length) return { online: new Set(), watching: new Set() };
+  const answer = await realtime.online(ids, conversation === undefined ? {} : { channel: `c:${conversation}` });
+  return { online: new Set(answer.online), watching: new Set(answer.watching) };
 }

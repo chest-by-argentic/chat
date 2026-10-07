@@ -14,7 +14,7 @@
       { "name": "c:{id}", "join": { "table": "conversation_members", "key": "conversation_id", "member": "member_id" }, "send": true }
     ],
     "feeds": [
-      { "table": "messages", "channel": "c:{conversation_id}", "columns": ["id", "conversation_id", "thread_id", "author", "kind", "created_at", "edited_at", "deleted_at", "pinned_at", "reply_count", "last_reply_at"] },
+      { "table": "messages", "channel": "c:{conversation_id}", "columns": ["id", "conversation_id", "thread_id", "author", "kind", "mentions", "mention_all", "created_at", "edited_at", "deleted_at", "pinned_at", "reply_count", "last_reply_at"] },
       { "table": "reactions", "channel": "c:{conversation_id}", "columns": ["message_id", "emoji", "member_id"] }
     ]
   },
