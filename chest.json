@@ -1,0 +1,22 @@
+{
+  "chest": "0.5",
+  "name": "chat",
+  "title": "Chat",
+  "description": "Channels, direct messages and threads for your team, live, with every message sealed. Files are not sealed yet.",
+  "icon": "chest/icon.svg",
+  "capabilities": ["database", "files", "members", "members.groups", "notifications", "realtime", "sealed"],
+  "files": { "quota": "10 GiB", "maxObject": "100 MiB" },
+  "receives": ["member.*"],
+  "schedules": [{ "name": "tidy", "cron": "30 3 * * *" }],
+  "realtime": {
+    "channels": [
+      { "name": "everyone", "presence": true },
+      { "name": "c:{id}", "join": { "table": "conversation_members", "key": "conversation_id", "member": "member_id" }, "send": true }
+    ],
+    "feeds": [
+      { "table": "messages", "channel": "c:{conversation_id}", "columns": ["id", "conversation_id", "thread_id", "author", "kind", "created_at", "edited_at", "deleted_at", "pinned_at", "reply_count", "last_reply_at"] },
+      { "table": "reactions", "channel": "c:{conversation_id}", "columns": ["message_id", "emoji", "member_id"] }
+    ]
+  },
+  "build": { "runtime": "node", "install": "npm ci", "command": "npm run build", "start": "npm start", "port": 3000, "static": ["/assets/"] }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "chat",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc && vite build && vite build --ssr",
+    "start": "node dist/server/main.js",
+    "test": "tsc && vite build && vite build --ssr --mode test --outDir dist/test && node --test --test-force-exit --test-concurrency=1 test/*.test.mjs",
+    "test:browser": "playwright test -c test/browser/playwright.config.ts",
+    "preview": "npm run build && vite build --ssr --mode test --outDir dist/test && node test/lab/preview.mjs",
+    "memory": "npm run build && node test/lab/memory.mjs"
+  },
+  "dependencies": {
+    "@argentic/chest-sdk": "file:vendor/chest-sdk-0.5.0.tgz",
+    "@hono/node-server": "^2.1.3",
+    "hono": "^4.13.12",
+    "postgres": "^3.4.9",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  }
+}
