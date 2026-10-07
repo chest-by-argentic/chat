@@ -4,6 +4,7 @@ import { Icon } from "./bits.js";
 import { MessageList } from "./MessageList.js";
 import { Composer } from "./Composer.js";
 import { Typing } from "./ConversationView.js";
+import { Menu } from "./Menu.js";
 
 // A thread beside its conversation (in front of it on a phone): the root,
 // its replies, a composer, following.
@@ -28,11 +29,7 @@ export function ThreadPane() {
         <button type="button" className="icon-button back" aria-label={w.back} onClick={close}><Icon name="back" /></button>
         <h2 id="thread-title" className="title"><span>{w.thread}</span><span className="where">{where}</span></h2>
         <span className="grow" />
-        {thread ? (
-          <button type="button" className="button quiet small" onClick={() => void a.follow(thread.root.id, !thread.following)}>
-            {thread.following ? w.unfollow : w.follow}
-          </button>
-        ) : null}
+        {thread ? <Menu label={w.more} icon="more" items={[{ label: thread.following ? w.unfollow : w.follow, icon: "bell", run: () => void a.follow(thread.root.id, !thread.following) }]} /> : null}
         <button type="button" className="icon-button close" aria-label={w.close} title={w.close} onClick={close}><Icon name="close" /></button>
       </header>
       {thread ? (

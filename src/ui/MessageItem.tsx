@@ -31,27 +31,33 @@ export const MessageItem = memo(function MessageItem({ m, grouped, inThread, foc
   if (m.kind !== "message") return <SystemLine m={m} />;
 
   const link = () => `${location.origin}${pathOf(m.thread === null ? { view: "conversation", id: m.conversation, thread: null, message: m.id } : { view: "conversation", id: m.conversation, thread: m.thread, message: null })}`;
+  const thread = m.thread === null && !inThread ? () => void a.go({ view: "conversation", id: m.conversation, thread: m.id, message: null }) : null;
+  const save = () => void a.save(m.id, !m.saved);
   const more: MenuItem[] = [
     ...(own && !m.deleted && m.text !== null && writable ? [{ label: w.edit, icon: "edit" as const, run: () => a.setEditing(m.id) }] : []),
     ...(writable && m.thread === null && !m.deleted ? [{ label: m.pinned ? w.unpin : w.pin, icon: "pin" as const, run: () => void a.pin(m.id, !m.pinned) }] : []),
-    { label: w.copyLink, icon: "link", run: () => { void navigator.clipboard?.writeText(link()).then(() => a.toast(w.linkCopied)); } },
+    { label: w.copyLink, icon: "link" as const, run: () => { void navigator.clipboard?.writeText(link()).then(() => a.toast(w.linkCopied)); } },
     ...(joined ? [{ label: w.markUnread, icon: "unread" as const, run: () => void a.markUnread(m.id) }] : []),
-    ...((own || me.isAdmin) && !m.deleted ? [{ label: w.delete, icon: "trash" as const, danger: true, run: () => a.openDialog({ kind: "confirm", text: w.confirmDelete, action: w.delete, run: () => a.remove(m.id) }) }] : []),
+    ...((own || me.isAdmin) && !m.deleted ? [{ label: w.delete, icon: "trash" as const, run: () => a.openDialog({ kind: "confirm", text: w.confirmDelete, action: w.delete, run: () => a.remove(m.id) }) }] : []),
   ];
   const pending = m.pending !== undefined;
+  const actionable = !pending && !editing && !m.deleted && m.text !== null;
+  // A long press on a touch screen opens the message's actions.
   const touchStart = (e: React.PointerEvent) => {
-    if (e.pointerType !== "touch") return;
+    if (e.pointerType !== "touch" || !actionable) return;
     press.current = setTimeout(() => setHeld(true), 450);
   };
   const touchEnd = () => clearTimeout(press.current);
+  const mentionsMe = !own && (m.mentions.includes(me.id) || m.mentionAll);
 
   return (
-    <article className={`message${grouped ? " grouped" : ""}${highlighted ? " highlighted" : ""}${pending ? ` ${m.pending}` : ""}${held || picking ? " held" : ""}`}
+    <article className={`message${grouped ? " grouped" : ""}${highlighted ? " highlighted" : ""}${mentionsMe ? " mentions-me" : ""}${pending ? ` ${m.pending}` : ""}${held || picking ? " held" : ""}`}
       data-message={m.id} tabIndex={focused ? 0 : -1} aria-labelledby={`m${m.id}-who`}
       onPointerDown={touchStart} onPointerUp={touchEnd} onPointerCancel={touchEnd} onPointerMove={touchEnd}
+      onContextMenu={e => { if (held) e.preventDefault(); }}
       onKeyDown={e => {
         if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" && m.thread === null && !inThread && !pending) { e.preventDefault(); void a.go({ view: "conversation", id: m.conversation, thread: m.id, message: null }); }
+        if (e.key === "Enter" && thread && !pending) { e.preventDefault(); thread(); }
         else if (e.key === "e" && own && !pending && !m.deleted) { e.preventDefault(); a.setEditing(m.id); }
       }}>
       <div className="gutter">
@@ -86,29 +92,61 @@ export const MessageItem = memo(function MessageItem({ m, grouped, inThread, foc
         {m.pending === "sending" ? <p className="status-line">…</p> : null}
         {m.pending === "failed" ? (
           <p className="status-line failed" role="alert">
-            {w.failed} <button type="button" className="link" onClick={() => void a.retry(m)}>{w.send}</button> · <button type="button" className="link" onClick={() => a.discard(m)}>{w.delete}</button>
+            {w.notSent} <button type="button" className="link" onClick={() => void a.retry(m)}>{w.retry}</button> · <button type="button" className="link" onClick={() => a.discard(m)}>{w.discard}</button>
           </p>
         ) : null}
       </div>
-      {!pending && !editing && !m.deleted && m.text !== null ? (
+      {actionable ? (
         <div className="toolbar" role="toolbar" aria-label={w.messageActions}>
           {writable ? quick.slice(0, 3).map(e => (
             <button key={e} type="button" className="icon-button emoji" aria-label={w.reactWith(e)} title={w.reactWith(e)}
-              onClick={() => { void a.react(m.id, e, !m.reactions.find(r => r.emoji === e)?.members.includes(me.id)); setHeld(false); }}>{e}</button>
+              onClick={() => void a.react(m.id, e, !m.reactions.find(r => r.emoji === e)?.members.includes(me.id))}>{e}</button>
           )) : null}
           {writable ? <button type="button" className="icon-button" aria-label={w.react} title={w.react} onClick={() => setPicking(true)}><Icon name="smile" size={16} /></button> : null}
-          {m.thread === null && !inThread ? <button type="button" className="icon-button" aria-label={w.replyInThread} title={w.replyInThread}
-            onClick={() => { setHeld(false); void a.go({ view: "conversation", id: m.conversation, thread: m.id, message: null }); }}><Icon name="reply" size={16} /></button> : null}
+          {thread ? <button type="button" className="icon-button" aria-label={w.replyInThread} title={w.replyInThread} onClick={thread}><Icon name="reply" size={16} /></button> : null}
           <button type="button" className="icon-button" aria-pressed={m.saved} aria-label={m.saved ? w.removeFromSaved : w.saveForLater} title={m.saved ? w.removeFromSaved : w.saveForLater}
-            onClick={() => void a.save(m.id, !m.saved)}><Icon name="bookmark" size={16} /></button>
-          <Menu label={w.more} icon="more" items={more} onOpen={open => { if (!open) setHeld(false); }} />
-          {held ? <button type="button" className="icon-button" aria-label={w.close} onClick={() => setHeld(false)}><Icon name="close" size={16} /></button> : null}
+            onClick={save}><Icon name="bookmark" size={16} /></button>
+          <Menu label={w.more} icon="more" items={more} />
         </div>
       ) : null}
-      {picking ? <EmojiPicker onPick={e => { void a.react(m.id, e, true); setPicking(false); setHeld(false); }} onClose={() => setPicking(false)} /> : null}
+      {held ? (
+        <ActionSheet onClose={() => setHeld(false)}
+          react={writable ? e => void a.react(m.id, e, !m.reactions.find(r => r.emoji === e)?.members.includes(me.id)) : null}
+          mine={e => !!m.reactions.find(r => r.emoji === e)?.members.includes(me.id)}
+          items={[
+            ...(writable ? [{ label: w.react, icon: "smile" as const, run: () => setPicking(true) }] : []),
+            ...(thread ? [{ label: w.replyInThread, icon: "reply" as const, run: thread }] : []),
+            { label: m.saved ? w.removeFromSaved : w.saveForLater, icon: "bookmark" as const, run: save },
+            ...(m.text ? [{ label: w.copyText, icon: "copy" as const, run: () => { void navigator.clipboard?.writeText(m.text ?? "").then(() => a.toast(w.textCopied)); } }] : []),
+            ...more,
+          ]} />
+      ) : null}
+      {picking ? <EmojiPicker onPick={e => { void a.react(m.id, e, true); setPicking(false); }} onClose={() => setPicking(false)} /> : null}
     </article>
   );
 });
+
+// ActionSheet is a message's actions on a touch screen: reactions at a
+// thumb's reach, then each action in words.
+function ActionSheet({ items, react, mine, onClose }: { items: MenuItem[]; react: ((emoji: string) => void) | null; mine: (emoji: string) => boolean; onClose: () => void }) {
+  const w = useWords();
+  const run = (f: () => void) => (e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.closest("dialog")?.close(); f(); };
+  return (
+    <dialog className="sheet" aria-label={w.messageActions} ref={d => { if (d && !d.open) d.showModal(); }} onClose={onClose}
+      onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close(); }}>
+      {react ? (
+        <div className="quick">
+          {quick.map(e => <button key={e} type="button" aria-pressed={mine(e)} aria-label={w.reactWith(e)} onClick={run(() => react(e))}>{e}</button>)}
+        </div>
+      ) : null}
+      <ul>
+        {items.map(item => (
+          <li key={item.label}><button type="button" onClick={run(item.run)}>{item.icon ? <Icon name={item.icon} size={20} /> : null}{item.label}</button></li>
+        ))}
+      </ul>
+    </dialog>
+  );
+}
 
 function ReactionButton({ m, emoji, members, disabled }: { m: Message; emoji: string; members: string[]; disabled: boolean }) {
   const w = useWords();

@@ -73,7 +73,7 @@ export async function hydrate(sql: Sql, request: Request, who: Member, rows: Mes
   const savedIds = new Set(saved.map(s => s.message_id));
   return rows.map((r, i) => ({
     id: r.id, conversation: r.conversation_id, thread: r.thread_id, author: r.author, kind: r.kind,
-    text: known.get(r.id) ?? opened[i] ?? null, meta: r.meta,
+    text: known.get(r.id) ?? opened[i] ?? null, meta: r.meta, mentions: r.mentions, mentionAll: r.mention_all,
     createdAt: r.created_at.toISOString(), editedAt: r.edited_at?.toISOString() ?? null, deleted: r.deleted_at !== null,
     pinned: r.pinned_at !== null, replyCount: r.reply_count, lastReplyAt: r.last_reply_at?.toISOString() ?? null, repliers: r.repliers,
     reactions: reactions.filter(x => x.message_id === r.id).map(x => ({ emoji: x.emoji, members: x.members })),

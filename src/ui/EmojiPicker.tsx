@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { emoji, find } from "../shared/emoji.js";
+import { emoji, find, quick } from "../shared/emoji.js";
 import { useWords } from "./context.js";
 
 // Choose an emoji: search by its words (English or French), or move in the
@@ -7,6 +7,7 @@ import { useWords } from "./context.js";
 export function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onClose: () => void }) {
   const w = useWords();
   const [q, setQ] = useState("");
+  const [shownName, setShownName] = useState("");
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -30,15 +31,17 @@ export function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => vo
     else if (e.key === "Enter" && at < 0 && cells[0]) { e.preventDefault(); onPick(cells[0].dataset["emoji"]!); }
   };
   const cell = (e: string) => (
-    <button key={e} type="button" className="emoji-cell" data-emoji={e} aria-label={nameOf(e)} title={`:${nameOf(e).replace(/ /gu, "_")}:`} onClick={() => onPick(e)}>{e}</button>
+    <button key={e} type="button" className="emoji-cell" data-emoji={e} aria-label={nameOf(e)} onClick={() => onPick(e)}
+      onPointerEnter={() => setShownName(`${e}  :${nameOf(e).replace(/ /gu, "_")}:`)} onFocus={() => setShownName(`${e}  :${nameOf(e).replace(/ /gu, "_")}:`)}>{e}</button>
   );
   return (
     <div ref={panel} className="emoji-picker" role="dialog" aria-label={w.emoji} onKeyDown={keys}>
       <input ref={input} type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={w.emojiSearch} aria-label={w.emojiSearch} />
       <div className="emoji-grid">
         {shown ? (shown.length ? <div className="emoji-row">{shown.map(cell)}</div> : <p className="empty">{w.emojiNone}</p>)
-          : <div className="emoji-row">{emoji.map(e => cell(e.emoji))}</div>}
+          : <div className="emoji-row">{[...quick, ...emoji.map(e => e.emoji).filter(e => !quick.includes(e))].map(cell)}</div>}
       </div>
+      <p className="emoji-preview" aria-hidden="true">{shownName}</p>
     </div>
   );
 }

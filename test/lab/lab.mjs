@@ -143,7 +143,7 @@ export async function startLab({ members, groups = [], chest = {} } = {}) {
   await listener.listen("chest_realtime", text => {
     const n = JSON.parse(text);
     if (n.k === "m") fake.realtime.removed(n.t, n.key, n.m);
-    else void realtime.publish(n.c, n.e, n.r);
+    else realtime.publish(n.c, n.e, n.r).catch(() => { /* at most once, as the Chest */ });
   });
 
   const { app, settled, closeDb } = await import(join(root, "dist", "test", "app.js"));

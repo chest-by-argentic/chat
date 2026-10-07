@@ -44,6 +44,11 @@ export function ConversationView() {
             onClick={() => void a.settings(viewing.id, { starred: !viewing.starred })}><Icon name="star" /></button>
         ) : null}
         <span className="grow" />
+        {viewing.kind !== "direct" ? (
+          <button type="button" className="head-count" aria-label={w.members(viewing.memberCount)} title={w.members(viewing.memberCount)} onClick={() => a.toggleDetails(true)}>
+            <Icon name="people" size={16} />{viewing.memberCount}
+          </button>
+        ) : null}
         <button type="button" className="icon-button" aria-label={w.searchIn(heading)} title={w.searchIn(heading)}
           onClick={() => void a.go({ view: "search", q: viewing.kind === "direct" ? "" : `in:#${viewing.name} ` })}><Icon name="search" /></button>
         <button type="button" className="icon-button" aria-label={w.details} title={w.details} aria-expanded={detailsOpen} aria-controls="details"

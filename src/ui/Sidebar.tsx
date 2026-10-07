@@ -78,7 +78,7 @@ function Section({ title, add, children }: { title: string; add: ReactNode; chil
     <section className="section">
       <div className="section-head">
         <button type="button" className="section-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <span className="caret" aria-hidden="true">{open ? "▾" : "▸"}</span>{title}
+          <Icon name="chevron" size={12} />{title}
         </button>
         {add}
       </div>
@@ -106,11 +106,12 @@ function Row({ c }: { c: Conversation }) {
         aria-current={current ? "page" : undefined} aria-label={label}
         onClick={e => { e.preventDefault(); void a.go({ view: "conversation", id: c.id, thread: null, message: null }); }}>
         {c.kind === "direct"
-          ? <span className="row-avatar"><Avatar person={people[other!]} size={20} />{c.people.length <= 2 ? <Presence id={other!} /> : null}</span>
+          ? <span className="row-avatar"><Avatar person={people[other!]} size={20} /></span>
           : <Icon name={c.kind === "private" ? "lock" : "hash"} size={16} />}
         <span className="row-name">{title}</span>
+        {c.kind === "direct" && c.people.length <= 2 ? <Presence id={other!} /> : null}
         {draft ? <Icon name="pencil" size={14} /> : null}
-        {count > 0 ? <span className="pill" aria-hidden="true">{count > 99 ? "99+" : count}</span> : null}
+        {count > 0 ? <span className="pill" aria-hidden="true">{count > 99 ? "99+" : count}</span> : unread ? <span className="dot" aria-hidden="true" /> : null}
       </a>
     </li>
   );

@@ -46,12 +46,12 @@ export function DetailsPane() {
       </header>
       <div className="details-scroll">
         {channel ? (
-          <section className="detail">
+          <section className="detail-section">
             <h3>{w.about}</h3>
             {about === null ? (
               <>
                 {details?.about ? <Text text={details.about} /> : <p className="muted">{details?.about === null ? w.noAbout : ""}</p>}
-                {viewing.joined && !viewing.archived && details ? <button type="button" className="link" onClick={() => setAbout(details.about ?? "")}>{w.editAbout}</button> : null}
+                {viewing.joined && !viewing.archived && details ? <button type="button" className="link" onClick={() => setAbout(details.about ?? "")}>{details.about ? w.editAbout : w.addAbout}</button> : null}
               </>
             ) : (
               <form onSubmit={e => { e.preventDefault(); void a.update(viewing.id, { about }).then(() => setAbout(null), () => a.toast(w.failed)); }}>
@@ -66,7 +66,7 @@ export function DetailsPane() {
           </section>
         ) : null}
 
-        <section className="detail">
+        <section className="detail-section">
           <h3>{w.notifications}</h3>
           <fieldset className="choices" disabled={!viewing.joined}>
             <legend className="sr-only">{w.notifications}</legend>
@@ -80,7 +80,7 @@ export function DetailsPane() {
           <p className="muted">{w.notifyHint}</p>
         </section>
 
-        <section className="detail">
+        <section className="detail-section">
           <h3>{w.people} <span className="count">{details?.memberCount ?? ""}</span></h3>
           {channel && viewing.joined && !viewing.archived ? (
             <button type="button" className="button quiet small" onClick={() => a.openDialog({ kind: "add", conversation: viewing.id })}><Icon name="plus" size={16} />{w.addPeople}</button>
@@ -98,15 +98,16 @@ export function DetailsPane() {
           <ul className="people">
             {(details?.members ?? viewing.people).map(id => (
               <li key={id}>
-                <span className="row-avatar"><Avatar person={people[id]} size={24} /><Presence id={id} /></span>
+                <Avatar person={people[id]} size={24} />
                 <span className="grow">{nameOf(people[id], w)}{id === me.id ? ` ${w.youSuffix}` : ""}</span>
+                <Presence id={id} />
                 {channel && details?.canManage && id !== me.id && !viewing.isDefault ? <button type="button" className="link" onClick={() => void a.removeMember(viewing.id, id)}>{w.remove}</button> : null}
               </li>
             ))}
           </ul>
         </section>
 
-        <section className="detail">
+        <section className="detail-section">
           <h3>{w.pinnedMessages}</h3>
           {pinned?.length ? (
             <ul className="pinned">
@@ -123,9 +124,9 @@ export function DetailsPane() {
         </section>
 
         {channel ? (
-          <section className="detail actions">
+          <section className="detail-section actions">
             {details?.canManage && !viewing.archived ? (
-              name === null ? <button type="button" className="button quiet" onClick={() => setName(viewing.name ?? "")}><Icon name="edit" size={16} />{w.rename}</button> : (
+              name === null ? <button type="button" className="action-row" onClick={() => setName(viewing.name ?? "")}><Icon name="edit" size={18} />{w.rename}</button> : (
                 <form onSubmit={e => { e.preventDefault(); void rename(); }}>
                   <label className="field"><span>{w.nameLabel}</span><input value={name} onChange={e => { setName(e.target.value.toLowerCase()); setError(null); }} maxLength={80} autoFocus aria-describedby="rename-hint" /></label>
                   <p id="rename-hint" className="muted">{error ?? w.nameHint}</p>
@@ -137,14 +138,14 @@ export function DetailsPane() {
               )
             ) : null}
             {details?.canManage && !viewing.isDefault ? (
-              <button type="button" className="button quiet" onClick={() => viewing.archived
+              <button type="button" className="action-row" onClick={() => viewing.archived
                 ? void a.update(viewing.id, { archived: false })
                 : a.openDialog({ kind: "confirm", text: w.confirmArchive(viewing.name ?? ""), action: w.archive, run: () => a.update(viewing.id, { archived: true }) })}>
-                <Icon name="archive" size={16} />{viewing.archived ? w.unarchive : w.archive}
+                <Icon name="archive" size={18} />{viewing.archived ? w.unarchive : w.archive}
               </button>
             ) : null}
             {viewing.joined && !viewing.isDefault ? (
-              <button type="button" className="button quiet danger" onClick={() => a.openDialog({ kind: "confirm", text: w.confirmLeave(viewing.name ?? ""), action: w.leave, run: () => a.leave(viewing.id) })}>{w.leave}</button>
+              <button type="button" className="action-row" onClick={() => a.openDialog({ kind: "confirm", text: w.confirmLeave(viewing.name ?? ""), action: w.leave, run: () => a.leave(viewing.id) })}><Icon name="back" size={18} />{w.leave}</button>
             ) : null}
           </section>
         ) : null}

@@ -26,6 +26,19 @@ test("markdown: only web and mail links, punctuation left out", () => {
   assert.equal(u.parse("<img src=x onerror=alert(1)>")[0].c[0], "<img src=x onerror=alert(1)>");
 });
 
+test("markdown: any text parses in linear time, nesting bounded", () => {
+  for (const text of ["*a ".repeat(13333), "*_~".repeat(1600) + "x" + "~_*".repeat(1600), "**".repeat(20000), "[a](".repeat(10000)]) {
+    const started = performance.now();
+    u.mentions(text);
+    const tree = u.parse(text);
+    assert.ok(performance.now() - started < 500, `${text.slice(0, 6)}… took too long`);
+    let depth = 0;
+    const walk = (nodes, d) => { for (const n of nodes) if (typeof n !== "string" && "c" in n) { depth = Math.max(depth, d + 1); walk(n.c, d + 1); } };
+    for (const b of tree) if (b.t === "p") walk(b.c, 0);
+    assert.ok(depth <= 9, "nesting stays shallow");
+  }
+});
+
 test("mentions: members, @channel, @here, never inside code", () => {
   const found = u.mentions(`<@${id}> <!here> \`<!channel>\` <#12>`);
   assert.deepEqual(found, { members: [id], channel: false, here: true, channels: [12] });

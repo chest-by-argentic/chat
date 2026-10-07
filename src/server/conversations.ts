@@ -71,18 +71,19 @@ export async function writable(sql: Sql, who: Member, id: number): Promise<Acces
 // list is the member's sidebar: the conversations they are in, not
 // archived, with their counts.
 export async function list(sql: Sql, who: Member): Promise<Conversation[]> {
-  const rows = await sql<(ConversationRow & MembershipRow & { people: string[] | null })[]>`
+  const rows = await sql<(ConversationRow & MembershipRow & { people: string[] | null; count: number })[]>`
     select c.*, cm.added, cm.last_read, cm.notify, cm.starred,
-      case when c.kind = 'direct' then (select array_agg(p.member_id order by p.member_id) from conversation_members p where p.conversation_id = c.id) end as people
+      case when c.kind = 'direct' then (select array_agg(p.member_id order by p.member_id) from conversation_members p where p.conversation_id = c.id) end as people,
+      (select count(*) from conversation_members p where p.conversation_id = c.id)::int as count
     from conversation_members cm join conversations c on c.id = cm.conversation_id
     where cm.member_id = ${who.id} and c.archived_at is null`;
   const counts = new Map((await summaries(sql, [who.id])).map(s => [s.conversation_id, s]));
-  return rows.map(r => conversation(r, { ...r }, r.people ?? [], counts.get(r.id)));
+  return rows.map(r => conversation(r, { ...r }, r.people ?? [], r.count, counts.get(r.id)));
 }
 
-function conversation(c: ConversationRow, m: MembershipRow | null, people: string[], counts?: { unread: number; mentions: number }): Conversation {
+function conversation(c: ConversationRow, m: MembershipRow | null, people: string[], memberCount: number, counts?: { unread: number; mentions: number }): Conversation {
   return {
-    id: c.id, kind: c.kind, name: c.name, people,
+    id: c.id, kind: c.kind, name: c.name, people, memberCount,
     archived: c.archived_at !== null, joined: m !== null, starred: m?.starred ?? false, notify: m?.notify ?? "default",
     unread: counts?.unread ?? 0, mentions: counts?.mentions ?? 0, lastRead: m?.last_read ?? 0,
     lastMessageId: c.last_message_id, lastMessageAt: c.last_message_at?.toISOString() ?? null,
@@ -94,18 +95,18 @@ function conversation(c: ConversationRow, m: MembershipRow | null, people: strin
 // public channel they preview, an archived one they open).
 export async function one(sql: Sql, who: Member, id: number): Promise<Conversation> {
   const a = await access(sql, who, id);
-  const people = a.conversation.kind === "direct" ? (await sql<{ member_id: string }[]>`select member_id from conversation_members where conversation_id = ${id} order by member_id`).map(r => r.member_id) : [];
+  const members = (await sql<{ member_id: string }[]>`select member_id from conversation_members where conversation_id = ${id} order by member_id`).map(r => r.member_id);
   const [counts] = a.membership ? await summaries(sql, [who.id], id) : [];
-  return conversation(a.conversation, a.membership, people, counts);
+  return conversation(a.conversation, a.membership, a.conversation.kind === "direct" ? members : [], members.length, counts);
 }
 
 // browse lists the public channels, with how many are in each.
-export async function browse(sql: Sql, who: Member): Promise<(Conversation & { memberCount: number })[]> {
+export async function browse(sql: Sql, who: Member): Promise<Conversation[]> {
   const rows = await sql<(ConversationRow & { joined: boolean; count: number })[]>`
     select c.*, exists (select 1 from conversation_members m where m.conversation_id = c.id and m.member_id = ${who.id}) as joined,
       (select count(*) from conversation_members m where m.conversation_id = c.id)::int as count
     from conversations c where c.kind = 'public' order by c.archived_at is not null, c.name`;
-  return rows.map(r => ({ ...conversation(r, r.joined ? { added: true, last_read: 0, notify: "default", starred: false } : null, []), memberCount: r.count }));
+  return rows.map(r => conversation(r, r.joined ? { added: true, last_read: 0, notify: "default", starred: false } : null, [], r.count));
 }
 
 // details are what the Details panel shows.

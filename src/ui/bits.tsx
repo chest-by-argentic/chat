@@ -34,6 +34,8 @@ const paths = {
   keyboard: "M3 6h18v12H3zM7 10h.5M11 10h.5M15 10h.5M7 14h10",
   archive: "M4 5h16v4H4zM5 9v10h14V9M10 13h4",
   edit: "M4 20h4L19 9l-4-4L4 16z",
+  chevron: "m6 9 6 6 6-6",
+  copy: "M8 8h12v12H8zM4 16V4h12",
 } as const;
 
 export type IconName = keyof typeof paths;

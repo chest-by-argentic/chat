@@ -146,6 +146,46 @@ test("mentions notify who is away, by name and place, never with the words", asy
   page.close();
 });
 
+test("a mention reaches only the conversation's members; @here, those active now", async () => {
+  const c = await channel(camille, "private", { members: [sam.id, lea.id] });
+  const page = connect({ url: lab.chest.realtime.url(lea.id) });
+  page.channel("everyone").presence.track({ away: false });
+  const away = connect({ url: lab.chest.realtime.url(sam.id) });
+  away.channel("everyone").presence.track({ away: true });
+  await waitFor(async () => (await presence()).includes(lea.id));
+  const m = await say(camille, c.id, `<!here> and <@${robin.id}>`);
+  const [row] = await lab.sql`select mentions, mention_here from messages where id = ${m.id}`;
+  assert.deepEqual(row.mentions, [lea.id], "Léa is active; Sam away; Robin outside");
+  assert.equal(row.mention_here, true);
+  assert.equal((await lab.sql`select 1 from thread_follows where message_id = ${m.id} and member_id = ${robin.id}`).length, 0);
+  // An edit may take @here out, not bring anyone in.
+  await ok(camille, "PATCH", `/messages/${m.id}`, { text: `hello <@${robin.id}> <!channel>` });
+  const [edited] = await lab.sql`select mentions, mention_all, mention_here from messages where id = ${m.id}`;
+  assert.deepEqual(edited, { mentions: [], mention_all: false, mention_here: false });
+  page.close();
+  away.close();
+});
+
+test("threads page their replies; reading only goes forward", async () => {
+  const c = await channel(camille, "public", { members: [sam.id] });
+  const root = await say(camille, c.id, "long thread");
+  for (let i = 0; i < 55; i++) await say(sam, c.id, `reply ${i}`, root.id);
+  const first = await ok(camille, "GET", `/threads/${root.id}`);
+  assert.equal(first.replies.length, 50);
+  assert.equal(first.more, true);
+  assert.equal(first.replies.at(-1).text, "reply 54");
+  const older = await ok(camille, "GET", `/threads/${root.id}?before=${first.replies[0].id}`);
+  assert.deepEqual(older.replies.map(r => r.text), ["reply 0", "reply 1", "reply 2", "reply 3", "reply 4"]);
+  assert.equal(older.more, false);
+  const top = await say(sam, c.id, "top");
+  await ok(camille, "PUT", `/conversations/${c.id}/read`, { message: top.id + 1000 });
+  const [mine] = await lab.sql`select last_read from conversation_members where conversation_id = ${c.id} and member_id = ${camille.id}`;
+  assert.equal(Number(mine.last_read), top.id, "never past the last message");
+  await ok(camille, "PUT", `/conversations/${c.id}/read`, { message: root.id });
+  const [still] = await lab.sql`select last_read from conversation_members where conversation_id = ${c.id} and member_id = ${camille.id}`;
+  assert.equal(Number(still.last_read), top.id, "never back");
+});
+
 test("direct messages notify every message, in the member's language, and set the badge", async () => {
   const d = await ok(robin, "POST", "/direct", { members: [hugo.id] });
   const before = lab.chest.notifications.length, badge = lab.chest.badges.get(hugo.id) ?? 0;
@@ -334,6 +374,8 @@ test("erasure: the person's words, files and places go; the Chest is told", asyn
   await say(camille, c.id, "kept reply", root.id);
   const alone = await say(hugo, c.id, "alone");
   await ok(hugo, "PUT", `/messages/${root.id}/reactions`, { emoji: "🎉", on: true });
+  const up = await ok(hugo, "POST", "/uploads", { conversation: c.id, size: 4 });
+  assert.equal((await fetch(lab.url + up.url, { method: "PUT", body: "lost", headers: { "content-type": "text/plain", cookie: `member=${hugo.id}` } })).status, 201);
   const erasure = "era_" + "a".repeat(26);
   const status = await lab.chest.emit({ type: "member.erased", data: { id: hugo.id, erasure, deadline: new Date(Date.now() + 864e5).toISOString() } }, lab.url);
   assert.equal(status, 204);
@@ -343,6 +385,7 @@ test("erasure: the person's words, files and places go; the Chest is told", asyn
   assert.equal((await lab.sql`select 1 from reactions where member_id = ${hugo.id}`).length, 0);
   assert.equal((await lab.sql`select 1 from conversation_members where member_id = ${hugo.id}`).length, 0);
   assert.ok(lab.chest.acknowledged.includes(erasure));
+  assert.ok(![...lab.chest.files.keys()].some(name => name.startsWith(`u/${hugo.id}/`)), "their uploads, sent or not, are gone");
 });
 
 async function presence() {

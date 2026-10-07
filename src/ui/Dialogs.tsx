@@ -13,7 +13,7 @@ export function Dialogs() {
   if (!dialog) return null;
   switch (dialog.kind) {
     case "switcher": return <Switcher />;
-    case "create": return <CreateChannel />;
+    case "create": return <CreateChannel name={dialog.name ?? ""} />;
     case "direct": return <NewDirect />;
     case "browse": return <Browse />;
     case "add": return <AddPeople conversation={dialog.conversation} />;
@@ -171,7 +171,7 @@ function PeoplePicker({ chosen, setChosen, groups, chosenGroups, setChosenGroups
           ))}
           {personItems.map((p, j) => (
             <li key={p.id} id={`${listId}-${groupItems.length + j}`} role="option" aria-selected={groupItems.length + j === at} onPointerDown={e => e.preventDefault()} onClick={() => pick(groupItems.length + j)}>
-              <span className="row-avatar"><Avatar person={p} size={20} /><Presence id={p.id} /></span><span className="grow">{p.name}</span>
+              <Avatar person={p} size={20} /><span className="grow">{p.name}</span><Presence id={p.id} />
             </li>
           ))}
           {!total ? <li className="empty" role="option" aria-selected="false" aria-disabled="true">{w.noPeople}</li> : null}
@@ -181,10 +181,10 @@ function PeoplePicker({ chosen, setChosen, groups, chosenGroups, setChosenGroups
   );
 }
 
-function CreateChannel() {
+function CreateChannel({ name: given }: { name: string }) {
   const w = useWords();
   const a = useActions();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(given);
   const [about, setAbout] = useState("");
   const [kind, setKind] = useState<"public" | "private">("public");
   const [chosen, setChosen] = useState<Person[]>([]);
@@ -303,7 +303,7 @@ function AddPeople({ conversation }: { conversation: number }) {
 function Browse() {
   const w = useWords();
   const a = useActions();
-  const [all, setAll] = useState<(Conversation & { memberCount: number })[] | null>(null);
+  const [all, setAll] = useState<Conversation[] | null>(null);
   const [q, setQ] = useState("");
   useEffect(() => { void a.browse().then(setAll, error => { setAll([]); a.fail(error); }); }, []);
   const t = normalize(q.trim());
@@ -326,7 +326,7 @@ function Browse() {
         </ul>
         {all && !shown.length ? <p className="empty">{w.noChannels}</p> : null}
         <div className="form-actions">
-          <button type="button" className="button quiet" onClick={e => { close(e.currentTarget); a.openDialog({ kind: "create" }); }}><Icon name="plus" size={16} />{w.newChannel}</button>
+          <button type="button" className="button quiet" onClick={e => { close(e.currentTarget); a.openDialog({ kind: "create", name: q.trim().toLowerCase().replace(/\s+/gu, "-") }); }}><Icon name="plus" size={16} />{q.trim() ? w.createNamed(q.trim().toLowerCase().replace(/\s+/gu, "-")) : w.newChannel}</button>
         </div>
       </div>
     </Modal>
@@ -354,7 +354,7 @@ function Confirm({ dialog }: { dialog: Extract<Dialog, { kind: "confirm" }> }) {
       <p>{dialog.text}</p>
       <div className="form-actions">
         <button type="button" className="button quiet" autoFocus onClick={e => close(e.currentTarget)}>{w.cancel}</button>
-        <button type="button" className="button danger" disabled={busy} onClick={async e => {
+        <button type="button" className="button" disabled={busy} onClick={async e => {
           const from = e.currentTarget;
           setBusy(true);
           try { await dialog.run(); close(from); } catch (error) { setBusy(false); a.fail(error); }

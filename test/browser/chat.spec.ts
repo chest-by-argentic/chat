@@ -94,7 +94,9 @@ test("a private channel made in the dialog reaches its member live, and taking t
   await expect(details.getByText("Sam Taylor")).toBeVisible();
   await shot(a.page, "desktop-light-en-details");
   await axe(a.page, "details");
-  await details.locator("li", { hasText: "Sam Taylor" }).getByRole("button", { name: "Remove" }).click();
+  const samRow = details.locator("li", { hasText: "Sam Taylor" });
+  await samRow.hover();
+  await samRow.getByRole("button", { name: "Remove" }).click();
   await expect(b.page.getByRole("link", { name: /launch-plan/u })).toHaveCount(0);
   await expect(b.page.getByText("This conversation doesn't exist or you no longer have access to it.")).toBeVisible();
   await a.context.close();
@@ -120,6 +122,34 @@ test("the keyboard: Cmd-K jumps, search finds sealed words, shortcuts are listed
   await expect(a.page.locator("mark", { hasText: "budget" })).toBeVisible();
   await shot(a.page, "desktop-light-en-search");
   await axe(a.page, "search");
+
+  await a.page.getByRole("link", { name: /^Mentions/u }).click();
+  await expect(a.page.getByRole("heading", { name: "Mentions" })).toBeVisible();
+  await expect(a.page.locator(".card").first()).toBeVisible();
+  await shot(a.page, "desktop-light-en-mentions");
+  await axe(a.page, "mentions");
+  await a.page.getByRole("link", { name: /^Threads/u }).click();
+  await expect(a.page.locator(".card").first()).toBeVisible();
+  await shot(a.page, "desktop-light-en-threads");
+  await axe(a.page, "threads");
+
+  await a.page.getByRole("button", { name: "Add a channel" }).click();
+  await a.page.getByRole("menuitem", { name: "Browse channels" }).click();
+  await expect(a.page.getByRole("dialog", { name: "Browse channels" }).getByRole("button", { name: /design/u })).toBeVisible();
+  await shot(a.page, "desktop-light-en-browse");
+  await axe(a.page, "browse");
+  await a.page.keyboard.press("Escape");
+
+  await a.page.goto(`${lab}/chest/c/${seeded.design}`);
+  const kickoff = a.page.locator(`article[data-message="${seeded.kickoff}"]`);
+  await kickoff.hover();
+  await kickoff.getByRole("toolbar").getByRole("button", { name: "Add reaction" }).click();
+  await expect(a.page.getByRole("dialog", { name: "Emoji" })).toBeVisible();
+  await a.page.keyboard.type("rocket");
+  await shot(a.page, "desktop-light-en-emoji");
+  await axe(a.page, "emoji picker");
+  await a.page.keyboard.press("Enter");
+  await expect(kickoff.getByRole("button", { name: /reacted with 🚀/u })).toBeVisible();
 
   await a.page.keyboard.press("ControlOrMeta+/");
   await expect(a.page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
@@ -164,6 +194,16 @@ test("on a phone: the list first, one pane at a time, actions on a long press", 
   await expect(a.page.locator("article", { hasText: "review agenda" }).getByText("Robin Lee")).toBeVisible();
   await shot(a.page, "phone-light-en-conversation");
   await axe(a.page, "phone conversation");
+  // A long press shows the message's actions.
+  const agenda = a.page.locator("article", { hasText: "review agenda" });
+  await agenda.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true });
+  const sheet = a.page.getByRole("dialog", { name: "Message actions" });
+  await expect(sheet.getByRole("button", { name: "Reply in thread" })).toBeVisible();
+  await shot(a.page, "phone-light-en-actions");
+  await axe(a.page, "phone actions");
+  await sheet.getByRole("button", { name: "React with 🎉" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(agenda.getByRole("button", { name: /reacted with 🎉/u })).toBeVisible();
   await a.page.getByRole("button", { name: /3 replies/u }).click();
   await expect(a.page.getByRole("complementary", { name: /Thread/u })).toBeVisible();
   await shot(a.page, "phone-light-en-thread");
@@ -171,6 +211,11 @@ test("on a phone: the list first, one pane at a time, actions on a long press", 
   await a.page.getByRole("main").getByRole("button", { name: "Back" }).click();
   await expect(a.page.getByRole("navigation", { name: "Conversations" })).toBeVisible();
   await a.context.close();
+
+  const l = await as(browser, lea, phone);
+  await expect(l.page.getByRole("navigation", { name: "Conversations" })).toBeVisible();
+  await shot(l.page, "phone-light-fr-list");
+  await l.context.close();
 
   const d = await as(browser, hugo, { ...phone, colorScheme: "dark" }, `/c/${seeded.general}`);
   await expect(d.page.getByRole("heading", { name: "general" })).toBeVisible();

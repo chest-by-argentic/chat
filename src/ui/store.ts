@@ -19,7 +19,8 @@ export type ListView = "threads" | "mentions" | "saved" | "drafts";
 type ListState = { view: ListView; messages: Message[]; threads: ThreadSummary[]; more: boolean; loading: boolean };
 type SearchState = { q: string; messages: Message[]; cursor: string | null; through: string | null; loading: boolean; done: boolean; error: string | null };
 export type Dialog =
-  | { kind: "switcher" | "create" | "direct" | "shortcuts" | "browse" }
+  | { kind: "switcher" | "direct" | "shortcuts" | "browse" }
+  | { kind: "create"; name?: string }
   | { kind: "add"; conversation: number }
   | { kind: "confirm"; text: string; action: string; run: () => Promise<void> };
 type Connection = "online" | "offline" | "access_removed" | "signed_out";
@@ -550,7 +551,7 @@ export function createStore(initial: Initial) {
     async send(conversation: number, thread: number | null, text: string, files: { object: string; name: string; info: FileInfo }[]) {
       const key = `p${Date.now()}${Math.random()}`;
       const draft: Shown = {
-        id: -Date.now(), conversation, thread, author: state.me.id, kind: "message", text, meta: null,
+        id: -Date.now(), conversation, thread, author: state.me.id, kind: "message", text, meta: null, mentions: [], mentionAll: false,
         createdAt: new Date().toISOString(), editedAt: null, deleted: false, pinned: false, replyCount: 0, lastReplyAt: null, repliers: [],
         reactions: [], files: files.map(f => f.info), saved: false, pending: "sending", key,
       };
@@ -727,7 +728,7 @@ export function createStore(initial: Initial) {
       return found;
     },
     groups: () => get<{ id: string; name: string; size: number }[]>("/groups"),
-    browse: () => get<(Conversation & { memberCount: number })[]>("/conversations"),
+    browse: () => get<Conversation[]>("/conversations"),
   };
 
   return { get: () => state, subscribe, actions };

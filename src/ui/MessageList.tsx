@@ -141,6 +141,13 @@ export function MessageList({ messages, before, after, loading, newLine, focus, 
     const grouped = !!prev && prev.kind === "message" && m.kind === "message" && prev.author === m.author && d === prevDay && !isNew
       && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < groupWindow && !prev.pending;
     rows.push(<MessageItem key={m.key ?? m.id} m={m} grouped={grouped} inThread={inThread} focused={m.id === tabbable} highlighted={m.id === focus} />);
+    // In a thread, its root, then how many replied.
+    if (inThread && i === 0 && m.replyCount > 0) {
+      rows.push(<div key="replies" className="thread-divider" role="separator">{w.replies(m.replyCount)}</div>);
+      prev = undefined;
+      prevDay = d;
+      continue;
+    }
     prev = m;
     prevDay = d;
   }

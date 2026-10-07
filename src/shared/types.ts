@@ -25,6 +25,7 @@ export type Conversation = {
   name: string | null;
   // direct: the people in it, the member included
   people: string[];
+  memberCount: number;
   archived: boolean;
   joined: boolean;
   starred: boolean;
@@ -75,6 +76,9 @@ export type Message = {
   // the tool's lines: people added or removed, groups added (by name, as
   // they were called), a channel's former and new name
   meta: { members?: string[]; groups?: string[]; from?: string; to?: string } | null;
+  // the members it mentions (@here as it was sent), @channel
+  mentions: string[];
+  mentionAll: boolean;
   createdAt: string;
   editedAt: string | null;
   deleted: boolean;

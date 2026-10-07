@@ -51,7 +51,9 @@ export function ListView() {
             <div className={t.unread ? "card unread" : "card"}>
               <Where m={t.root} />
               <Card m={t.root} />
-              {t.root.replyCount > t.latest.length ? <p className="muted">{w.replies(t.root.replyCount - t.latest.length)}…</p> : null}
+              {t.root.replyCount > t.latest.length ? (
+                <button type="button" className="more-replies" onClick={() => void a.go({ view: "conversation", id: t.root.conversation, thread: t.root.id, message: null })}>{w.earlierReplies(t.root.replyCount - t.latest.length)}</button>
+              ) : null}
               {t.latest.map(r => <Card key={r.id} m={r} />)}
               <button type="button" className="button quiet small" onClick={() => void a.go({ view: "conversation", id: t.root.conversation, thread: t.root.id, message: null })}>
                 {w.viewThread}{t.unread ? ` · ${w.unread(t.unread)}` : ""}
@@ -84,7 +86,7 @@ function Where({ m }: { m: Message }) {
   const c = useStore(s => s.conversations.find(x => x.id === m.conversation));
   const people = useStore(s => s.people);
   const me = useStore(s => s.me.id);
-  return <span className="card-where">{c ? w.inConversation(c.kind === "direct" ? titleOf(c, people, me, w) : `#${c.name}`) : ""}</span>;
+  return <span className="card-where">{c ? <strong>{c.kind === "direct" ? titleOf(c, people, me, w) : `#${c.name}`}</strong> : null}</span>;
 }
 
 // Card is a message as a list shows it: author, time, text.
@@ -149,6 +151,7 @@ export function SearchView() {
   const route = useStore(s => s.route);
   const zone = useStore(s => s.me.timeZone);
   const now = useStore(s => s.now);
+  const last = useStore(s => s.conversations.find(c => c.isDefault)?.id ?? s.conversations[0]?.id);
   const [q, setQ] = useState(route.view === "search" ? route.q : "");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
@@ -156,6 +159,12 @@ export function SearchView() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (q.trim()) void a.go({ view: "search", q: q.trim() }, { replace: true });
+  };
+  // A filter's chip writes its start in the field, where the member ends it.
+  const filter = (start: string) => {
+    const next = `${q.trim()} ${start}`.trimStart();
+    setQ(next);
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(next.length, next.length); });
   };
   const words = (search?.q ?? "").split(/\s+/u).filter(x => x && !/^(in|from|has|is|before|after):/u.test(x)).map(x => normalize(x.replace(/"/gu, "")));
   return (
@@ -165,12 +174,16 @@ export function SearchView() {
         <h2 id="search-title" className="sr-only">{w.search}</h2>
         <form className="search-form" role="search" onSubmit={submit}>
           <Icon name="search" />
-          <input ref={input} type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={w.searchPlaceholder} aria-label={w.searchPlaceholder} aria-describedby="search-hint" />
-          <button type="submit" className="button">{w.search}</button>
+          <input ref={input} type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={w.searchPlaceholder} aria-label={w.searchPlaceholder} enterKeyHint="search" />
         </form>
+        {last ? <button type="button" className="icon-button close" aria-label={w.closeSearch} title={w.closeSearch} onClick={() => void a.go({ view: "conversation", id: last, thread: null, message: null })}><Icon name="close" /></button> : null}
       </header>
       <div className="view-scroll">
-        <p id="search-hint" className="muted hint-block">{w.searchHint}<br />{w.searchSealedNote}</p>
+        <div className="filters" role="group" aria-label={w.filters}>
+          {([["in:#", w.filterIn], ["from:@", w.filterFrom], ["has:file", w.filterFile], ["is:thread", w.filterThread], ["after:", w.filterAfter], ["before:", w.filterBefore]] as const).map(([start, label]) => (
+            <button key={start} type="button" onClick={() => filter(start)}>{label}</button>
+          ))}
+        </div>
         {search?.q ? (
           <>
             <p className="muted" role="status">{search.loading && !search.messages.length ? w.searching : search.error ? w.failed : w.results(search.messages.length)}</p>
@@ -184,9 +197,8 @@ export function SearchView() {
               </p>
             ) : null}
           </>
-        ) : null}
+        ) : <p className="muted">{w.searchNewestFirst}</p>}
       </div>
     </main>
   );
 }
-

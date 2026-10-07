@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "./bits.js";
 
-export type MenuItem = { label: string; run: () => void; danger?: boolean; icon?: IconName };
+export type MenuItem = { label: string; run: () => void; icon?: IconName };
 
 // A button that opens a list of actions: arrows move, Enter runs, Escape
 // closes and gives the focus back, a click outside closes.
@@ -46,7 +46,7 @@ export function Menu({ label, icon, items, onOpen }: { label: string; icon: Icon
         <ul ref={list} id={id} role="menu" aria-label={label} className="menu-list" onKeyDown={keys}>
           {items.map(item => (
             <li key={item.label} role="none">
-              <button type="button" role="menuitem" className={item.danger ? "danger" : undefined} tabIndex={-1}
+              <button type="button" role="menuitem" tabIndex={-1}
                 onClick={() => { toggle(false); item.run(); }}>
                 {item.icon ? <Icon name={item.icon} size={16} /> : null}{item.label}
               </button>
