@@ -24,6 +24,7 @@ type ConversationRow = {
   created_at: Date;
   archived_at: Date | null;
   is_default: boolean;
+  confidential: boolean;
   last_message_id: number;
   last_message_at: Date | null;
 };
@@ -87,7 +88,7 @@ function conversation(c: ConversationRow, m: MembershipRow | null, people: strin
     archived: c.archived_at !== null, joined: m !== null, starred: m?.starred ?? false, notify: m?.notify ?? "default",
     unread: counts?.unread ?? 0, mentions: counts?.mentions ?? 0, lastRead: m?.last_read ?? 0,
     lastMessageId: c.last_message_id, lastMessageAt: c.last_message_at?.toISOString() ?? null,
-    isDefault: c.is_default, createdBy: c.created_by,
+    isDefault: c.is_default, confidential: c.confidential, createdBy: c.created_by,
   };
 }
 
@@ -275,7 +276,7 @@ export async function removeGroup(who: Member, id: number, group: string): Promi
 
 // update renames, describes, archives or unarchives a channel. Any member
 // of it describes it; renaming and archiving are its manager's.
-export async function update(who: Member, id: number, input: { name?: string; about?: string; archived?: boolean }): Promise<void> {
+export async function update(who: Member, id: number, input: { name?: string; about?: string; archived?: boolean; confidential?: boolean }): Promise<void> {
   const people = await db().begin(async sql => {
     const a = await access(sql, who, id);
     const c = a.conversation;
@@ -297,6 +298,12 @@ export async function update(who: Member, id: number, input: { name?: string; ab
       const [sealed] = input.about ? await seal([{ value: input.about, context: context.about(id) }]) : [null];
       await sql`update conversations set about = ${sealed ?? null} where id = ${id}`;
       await addLine(sql, id, who.id, "about");
+    }
+    // Confidential: its managers decide; the notices of its next messages
+    // name who and where only.
+    if (input.confidential !== undefined && input.confidential !== c.confidential) {
+      if (!a.manage) throw forbidden();
+      await sql`update conversations set confidential = ${input.confidential} where id = ${id}`;
     }
     if (input.archived !== undefined && input.archived !== (c.archived_at !== null)) {
       if (!a.manage || c.is_default) throw forbidden();

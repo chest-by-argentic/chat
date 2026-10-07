@@ -102,3 +102,11 @@ test("words: French has every word, and a language the tool does not speak falls
   assert.equal(u.resolvedNotify("direct", "default"), "all");
   assert.equal(u.resolvedNotify("public", "default"), "mentions");
 });
+
+test("a notice's preview: about 120 characters, cut between two words", () => {
+  assert.equal(u.previewCut("short"), "short");
+  const long = u.previewCut("word ".repeat(40).trim());
+  assert.ok(long.length <= 121 && long.endsWith("word…"), long);
+  const one = u.previewCut("x".repeat(300));
+  assert.equal(one.length, 121, "a single long word is cut where it must be");
+});

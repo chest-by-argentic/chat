@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-// The browser test: Chat on the local Chest of the tests (test/lab), two
+// The browser test: Chat on the local Chest of the tests (test/local), two
 // members live at once, desktop and phone, light and dark, English and
 // French, axe on every screen. npm run test:browser (after npm test's
 // builds).

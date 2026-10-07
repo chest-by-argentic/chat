@@ -753,7 +753,9 @@ export function createStore(initial: Initial) {
         void loadDetails(id);
       } catch (error) { fail(error); }
     },
-    async update(id: number, change: { name?: string; about?: string; archived?: boolean }) {
+    async update(id: number, change: { name?: string; about?: string; archived?: boolean; confidential?: boolean }) {
+      // A switch moves at once; the answer sets it right.
+      if (change.confidential !== undefined) updateConversation(id, c => ({ ...c, confidential: change.confidential! }));
       const updated = await patch<Conversation>(`/conversations/${id}`, change);
       updateConversation(id, () => updated);
       if (change.archived) set(s => ({ conversations: s.conversations.filter(c => c.id !== id), viewing: s.viewing?.id === id ? updated : s.viewing }));

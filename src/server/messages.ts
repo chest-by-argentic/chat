@@ -197,7 +197,7 @@ export async function post(request: Request, who: Member, conversation: number, 
   }
   const done = row;
   const [shown] = await hydrate(sql, request, who, [done]);
-  later("after a post", () => afterPost(who, a, done));
+  later("after a post", () => afterPost(who, a, done, text));
   return shown!;
 
   async function write(tx: postgres.TransactionSql, id: number, body: string): Promise<MessageRow> {

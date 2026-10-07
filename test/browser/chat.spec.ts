@@ -1,12 +1,12 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { camille, hugo, lea, sam } from "../lab/people.mjs";
+import { camille, hugo, lea, sam } from "../harness/people.mjs";
 
 // Chat in a browser, on the local Chest of the tests: two members live at
 // once, the phone, dark, French, keyboard; axe on every screen. With
 // CHAT_SCREENS set, the screens are saved there.
 
-const lab = process.env["CHAT_LAB"]!;
+const local = process.env["CHAT_URL"]!;
 const seeded = JSON.parse(process.env["CHAT_SEED"]!) as { design: number; board: number; general: number; dm: number; kickoff: number };
 const screens = process.env["CHAT_SCREENS"];
 const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 };
@@ -16,7 +16,7 @@ async function as(browser: Browser, member: { id: string }, options: Parameters<
   const page = await context.newPage();
   page.on("pageerror", error => { throw error; });
   page.on("response", response => { if (response.status() >= 400) console.log("HTTP", response.status(), response.url()); });
-  await page.goto(`${lab}/__as/${member.id}?to=${encodeURIComponent(to)}`);
+  await page.goto(`${local}/__as/${member.id}?to=${encodeURIComponent(to)}`);
   await expect(page.locator(".sidebar")).toBeAttached();
   await page.waitForFunction(() => document.querySelector("[data-island]")?.hasChildNodes());
   return { context, page };
@@ -92,6 +92,9 @@ test("a private channel made in the dialog reaches its member live, and taking t
   await a.page.getByRole("button", { name: "Details" }).click();
   const details = a.page.getByRole("complementary", { name: /Details/u });
   await expect(details.getByText("Sam Taylor")).toBeVisible();
+  // The channel's creator makes it confidential: its notices lose their preview.
+  await details.getByRole("checkbox", { name: "Confidential: no preview in notifications" }).check();
+  await expect(details.getByText("Notifications say only who wrote and where")).toBeVisible();
   await shot(a.page, "desktop-light-en-details");
   await axe(a.page, "details");
   const samRow = details.locator("li", { hasText: "Sam Taylor" });
@@ -140,7 +143,7 @@ test("the keyboard: Cmd-K jumps, search finds sealed words, shortcuts are listed
   await axe(a.page, "browse");
   await a.page.keyboard.press("Escape");
 
-  await a.page.goto(`${lab}/chest/c/${seeded.design}`);
+  await a.page.goto(`${local}/chest/c/${seeded.design}`);
   const kickoff = a.page.locator(`article[data-message="${seeded.kickoff}"]`);
   await kickoff.hover();
   await kickoff.getByRole("toolbar").getByRole("button", { name: "Add reaction" }).click();
@@ -163,7 +166,7 @@ test("dark, as the device says", async ({ browser }) => {
   await expect(a.page.getByRole("complementary", { name: /Thread/u })).toBeVisible();
   await shot(a.page, "desktop-dark-en-thread");
   await axe(a.page, "dark thread");
-  await a.page.goto(`${lab}/chest/c/${seeded.dm}`);
+  await a.page.goto(`${local}/chest/c/${seeded.dm}`);
   await expect(a.page.locator("article", { hasText: "Do you have five minutes" })).toBeVisible();
   await shot(a.page, "desktop-dark-en-direct");
   await a.context.close();

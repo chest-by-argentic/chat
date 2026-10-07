@@ -162,6 +162,10 @@ export const en = {
   notifyNone: "Nothing",
   notifyDefault: (what: string) => `${what} — default`,
   notifyHint: "You're notified in your Chest when you're not looking at Chat.",
+  confidential: "Confidential: no preview in notifications",
+  confidentialOff: "Notifications show the first words of each message. They then leave the seal: the Chest keeps them in its notifications and may email them.",
+  confidentialOn: "Notifications say only who wrote and where: no words of a message leave the seal.",
+  confidentialWho: "The channel's creator and the Chest's admins change this.",
   rename: "Rename",
   nameLabel: "Name",
   archive: "Archive channel",
@@ -242,6 +246,7 @@ export const en = {
   notifyTitleChannel: (who: string, channel: string) => `${who} in #${channel}`,
   notifyTitleDirect: (who: string) => who,
   notifyTitleThread: (who: string, where: string) => `${who} replied in ${where}`,
+  notifyTitleMention: (who: string, where: string) => `${who} mentioned you in ${where}`,
   notifyNew: "New message",
   notifyMention: "Mentioned you",
 

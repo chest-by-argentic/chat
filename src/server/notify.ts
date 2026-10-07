@@ -8,6 +8,7 @@ import { badges } from "./counts.js";
 import { resolvedNotify } from "../shared/rules.js";
 import type { MessageRow } from "./messages.js";
 import * as live from "./live.js";
+import { preview } from "./preview.js";
 import { later } from "./later.js";
 
 // After a message: the members' pages are told (ids only), those who are
@@ -18,7 +19,7 @@ import { later } from "./later.js";
 const titleCut = 80;
 const cut = (s: string) => (s.length > titleCut ? s.slice(0, titleCut - 1) + "…" : s);
 
-export async function afterPost(author: Member, a: Access, m: MessageRow): Promise<void> {
+export async function afterPost(author: Member, a: Access, m: MessageRow, text: string): Promise<void> {
   const sql = db();
   const c = a.conversation;
   const members = await sql<{ member_id: string; notify: "default" | "all" | "mentions" | "none" }[]>`select member_id, notify from conversation_members where conversation_id = ${c.id}`;
@@ -28,6 +29,7 @@ export async function afterPost(author: Member, a: Access, m: MessageRow): Promi
   const followers = m.thread_id === null ? new Set<string>() : new Set((await sql<{ member_id: string }[]>`
     select member_id from thread_follows where message_id = ${m.thread_id} and following`).map(r => r.member_id).filter(id => inside.has(id)));
   const mentioned = new Set(m.mentions);
+  const mention = (id: string) => mentioned.has(id) || m.mention_all;
   live.later.activity(members.map(r => r.member_id), { c: c.id, m: m.id, t: m.thread_id, a: author.id, mentions: m.mentions, all: m.mention_all, here: m.mention_here });
   if (m.thread_id !== null) live.later.thread(followers, { c: c.id, t: m.thread_id, m: m.id, a: author.id });
 
@@ -36,28 +38,38 @@ export async function afterPost(author: Member, a: Access, m: MessageRow): Promi
     if (id === author.id) return false;
     const level = resolvedNotify(c.kind, notify);
     if (level === "none") return false;
-    const named = mentioned.has(id) || m.mention_all;
-    if (m.thread_id !== null) return named || followers.has(id);
-    return level === "all" || named;
+    if (m.thread_id !== null) return mention(id) || followers.has(id);
+    return level === "all" || mention(id);
   };
   const candidates = members.filter(r => wants(r.member_id, r.notify)).map(r => r.member_id);
   // A member who is looking at Chat sees it come: no notice.
   const { active } = candidates.length ? await live.active() : { active: new Set<string>() };
   const away = candidates.filter(id => !active.has(id));
   if (away.length) {
-    const named = away.filter(id => mentioned.has(id) || m.mention_all);
-    const others = away.filter(id => !named.includes(id));
+    const named = away.filter(mention);
+    const others = away.filter(id => !mention(id));
     const where = c.kind === "direct" ? null : c.name!;
-    const words = (w: typeof en) => {
-      const title = m.thread_id !== null ? w.notifyTitleThread(author.name, where ? `#${where}` : w.directLabel.toLowerCase()) : where ? w.notifyTitleChannel(author.name, where) : w.notifyTitleDirect(author.name);
+    // The title says who and where (and, with a preview below it, that it
+    // mentions them); the body what the message says, or what happened.
+    const words = (w: typeof en, toNamed: boolean) => {
+      const place = where ? `#${where}` : w.directLabel.toLowerCase();
+      const title = toNamed && shown ? w.notifyTitleMention(author.name, place)
+        : m.thread_id !== null ? w.notifyTitleThread(author.name, place)
+        : where ? w.notifyTitleChannel(author.name, where) : w.notifyTitleDirect(author.name);
       return { title: cut(title) };
     };
     const key = m.thread_id !== null ? `t:${m.thread_id}` : `c:${c.id}`;
     const path = m.thread_id !== null ? `/chest/c/${c.id}/t/${m.thread_id}` : `/chest/c/${c.id}?m=${m.id}`;
-    const send = (ids: string[], body: (w: typeof en) => string) => ids.length
-      ? notifications.notify(ids, { ...words(en), body: body(en), path, key, translations: { fr: { ...words(fr), body: body(fr) } } })
+    // What the message says, as a preview — unless the channel is
+    // confidential. The words leave the seal here: the Chest keeps the
+    // notice in clear in its bell and mails it (push is encrypted end to
+    // end).
+    const shown = c.confidential ? "" : await preview(text);
+    const send = (ids: string[], toNamed: boolean) => ids.length
+      ? notifications.notify(ids, { ...words(en, toNamed), body: shown || (toNamed ? en.notifyMention : en.notifyNew), path, key,
+        translations: { fr: { ...words(fr, toNamed), body: shown || (toNamed ? fr.notifyMention : fr.notifyNew) } } })
       : Promise.resolve();
-    await Promise.all([send(named, w => w.notifyMention), send(others, w => w.notifyNew)]);
+    await Promise.all([send(named, true), send(others, false)]);
   }
 
   // Badges: unread direct messages and mentions; only theirs moved.

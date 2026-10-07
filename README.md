@@ -1,110 +1,140 @@
 # Chat
 
-The team's messaging tool of the Argentic store: channels (public,
-private, given to groups), direct messages, threads, mentions, reactions,
-files, pins, saved items, drafts on every device, search, live on every
-page — and every member's words sealed by the Chest.
+Team messaging for a Chest by Argentic: channels,
+direct messages and threads, live on every open page, with every message
+sealed by the Chest.
 
-What it is and why is decided in the product spec,
-[`01_produit/02_specs/store-chat.md`](../../../01_produit/02_specs/store-chat.md)
-(company folder). This page says how the code does it.
+- **Channels** — public ones anyone on the team can find and join, private
+  ones by invitation, and channels given to a group of the Chest (its
+  members come and go with the group). A default `#general` everyone joins.
+- **Direct messages** for one to nine people (alone, it is your notes).
+- **Threads**, **mentions** (`@someone`, `@channel`, `@here`),
+  **reactions**, **pins**, **saved** messages, **drafts** that follow you
+  from one device to another, **Mark unread**.
+- **Files and images**, sent by the browser straight to the Chest, shown
+  as thumbnails.
+- **Search** across everything you may read, with filters (`in:#channel`,
+  `from:@name`, `has:file`, `is:thread`, `before:`, `after:`).
+- **Live**: new messages, edits, reactions, who is typing, who is active —
+  through the Chest's realtime service, so the tool itself can sleep while
+  nobody writes.
+- **Notifications** in the Chest's bell, by push and by mail, as each
+  member chooses there: per conversation *All new messages*, *Mentions* or
+  *Nothing*; only when you are not looking at Chat; withdrawn once read.
+  **Badges** count unread direct messages and mentions.
+- **Keyboard** (`⌘/Ctrl K` to jump anywhere, `⌘/Ctrl /` for the list),
+  **phone** layout, **light and dark**, **English and French**,
+  accessible (WCAG 2.1 AA checked with axe).
 
-## How it is made
+## What is sealed
 
-The Chest's starter stack (Perseus): TypeScript, a Hono server that renders
-React on the server, one island hydrated in the browser, Vite for both
-builds; tool contract 0.5, the SDK as the packed tarball in `vendor/`.
+The Chest seals with the tool's key, and opens only for a member who may
+read it, every text a member writes: **messages, file names, drafts and
+channel descriptions**. The Chest's database console, its agents, backups
+and Perseus see `Sealed`; the Chest's admins see no message they could not
+read in Chat itself.
+
+Not sealed, because lists, access and notifications need them: channel
+names, who is in which conversation, who wrote when, mentions and
+reactions. **Files' bytes** are not sealed yet (the Chest does not seal
+files): the Chest's storage view shows them to its owner and admins.
+
+**Notifications show the first words of a message** (about 120
+characters, plain text). Those words leave the seal: the Chest keeps them
+in its notifications and may mail them; push is encrypted end to end. A
+channel marked **Confidential** (in its details, by its creator or the
+Chest's admins) keeps its notifications to who wrote and where.
+
+## Install it on a Chest
+
+Chat needs a Chest that serves tool contract **0.5** (realtime and sealed
+values). In the Chest, **Tools → Add a tool**, from the catalogue or from
+this repository; the owner or an admin approves what it asks:
+
+| Permission | Why |
+|---|---|
+| `database` | Conversations, messages (sealed), reads, reactions |
+| `sealed` | Every member's words sealed; each new version waits for the owner's or an admin's approval |
+| `files` (10 GiB, 100 MiB a file) | Attachments, sent by the browser to the Chest |
+| `members`, `members.groups` | Names and photos; groups as channel audiences |
+| `notifications` | The bell, push and mail notices, badges |
+| `realtime` | Live pages; the tool sleeps meanwhile |
+| `receives: member.*` | A member's groups changed; erasure of a person's data |
+| schedule `tidy`, nightly | Removes files uploaded and never sent |
+
+No network access, no public part.
+
+## Develop
+
+Node 22 or later. The stack: TypeScript, a [Hono](https://hono.dev)
+server rendering React on the server, one island hydrated in the browser,
+[Vite](https://vite.dev) for both builds, PostgreSQL through
+[postgres](https://github.com/porsager/postgres), and
+[`@argentic/chest-sdk`](https://github.com/chest-by-argentic/Chest-SDK)
+as the packed tarball in `vendor/`.
+
+```sh
+npm ci
+npm run build          # types, the browser's files, the server
+npm run preview        # Chat on a local Chest with a team and their conversations
+```
+
+`npm run preview` needs Docker (a disposable PostgreSQL); it prints an
+address and one link per member of its team: open one to use Chat as that
+person, another in a second browser to talk to yourself.
 
 | Path | What it is |
 |---|---|
-| `chest.json` | The manifest: capabilities (`database`, `files`, `members`, `members.groups`, `notifications`, `realtime`, `sealed`), files quota, `receives: member.*`, the nightly `tidy`, the realtime channels and feeds |
-| `migrations/0001_chat.sql` | The data model (below) |
-| `src/server/app.tsx` | Pages (`/chest/*`, rendered whole with the route open), the policy (a nonce per answer), `/chest-events`, `/chest-schedules`, `/assets/` |
-| `src/server/api.ts` | The JSON API under `/chest/api`: inputs read at the boundary, writes only from the tool's own pages |
-| `src/server/conversations.ts` | Conversations, who is in them and what each may do (`access`), groups as audiences (`reconcile`), reads |
-| `src/server/messages.ts` | Messages, threads, reactions, pins, saved, drafts, files |
-| `src/server/counts.ts` | Unread and mention counts, badges |
-| `src/server/notify.ts` | After a post: live hints, notices for those away, badges |
-| `src/server/search.ts` | Search on sealed messages (open and scan) |
-| `src/server/sealing.ts` | Sealing contexts; opening in chunks under the Chest's call bound |
-| `src/server/live.ts` | Direct realtime events; who is active |
-| `src/server/chest-calls.ts` | Member events (groups changed, erasure) and the nightly tidy |
-| `src/shared/` | What both sides use: the markdown reader, rules and bounds, routes, times, types, the words (`i18n/en.ts` the source, `fr.ts`), emoji |
-| `src/ui/` | The page: `store.ts` (state, actions, live events), `Chat.tsx` and its panes |
-| `src/client/` | The browser's entry (hydration) and the stylesheet |
-| `test/` | Unit tests (`units.test.mjs`), the API against PostgreSQL and the fake Chest (`api.test.mjs`), the browser test (`browser/`), the local Chest of the tests (`lab/`) |
-| `vendor/chest-sdk-0.5.0.tgz` | The SDK (never edited here). Today packed from Chest-SDK `main` (sealed values) merged locally with the realtime branch (PR #30, not merged yet); once realtime is on `main`, the Chest repository's `npm run sync:sdk` repacks it from there |
+| `chest.json` | The manifest: permissions, files, events, the nightly schedule, realtime channels and feeds |
+| `migrations/` | The database, played by the Chest in order |
+| `src/server/` | Pages and the JSON API under `/chest`, sealing, live events, notifications, search, the Chest's events and schedule |
+| `src/shared/` | What the server and the page share: the markdown reader, rules, routes, times, types, the words (`i18n/en.ts`, `fr.ts`), emoji |
+| `src/ui/` | The page: `store.ts` (state, actions, live events) and its panes |
+| `src/client/` | The browser's entry and the stylesheet |
+| `test/` | Unit, API and browser tests; `harness/` is the local Chest they run against |
+| `vendor/` | The SDK, packed; never edited here |
 
-## Data
+### How it works
 
-Member and group ids only (`mbr_…`, `grp_…`), names asked of the Chest
-when shown. Every text a member writes is sealed, bound to its row:
+- **Data.** Member and group ids only (`mbr_…`, `grp_…`); names are asked
+  of the Chest when shown. A sealed value is bound to its row (a message
+  to `m:<id>`, a file name to `f:<object>`, a draft to
+  `d:<member>:<conversation>:<thread>`): copied elsewhere, it opens
+  nowhere. A message's id is taken and its body sealed before its
+  transaction, which checks under the conversation's lock that no later id
+  was written (else it takes a new one): ids follow commit order.
+- **Live.** Each page tracks its presence on `everyone` (active, or away
+  when hidden) and joins `c:<id>` for the conversation it shows; the Chest
+  lets in only members listed in `conversation_members`. Feeds of
+  `messages` and `reactions` carry ids and times, never words: the page
+  asks the tool for what changed, opened for its member. Members' own sends
+  carry only `typing`. Everything else (unread counts, threads, reads on
+  another device, conversations added) comes as direct events to the
+  members concerned.
+- **Search.** Sealed text has no index. A search narrows in clear (what
+  you may read, filters), then opens messages newest first and keeps those
+  holding every word; it stops at 20 results or after 5,000 messages, 16 MB
+  or 2 seconds, and says how far back it looked.
+- **Notifications** go to members whose setting asks for them and who are
+  not active in Chat; the notice's title says who and where, its body the
+  message's first words, or nothing of them in a confidential channel.
 
-| Table | Holds | Sealed (context) |
-|---|---|---|
-| `conversations` | kind, name (channels), the default channel, archive, last message | `about` (`about:<id>`) |
-| `conversation_members` | the realtime membership table of `c:{id}`; per member: added in person or by a group, last read, notification level, star | — |
-| `conversation_groups`, `conversation_leaves` | groups given a channel; who left one a group gives them | — |
-| `messages` | author, kind (a message, or a line of the tool), thread, mentions (members of the conversation only), `@channel` / `@here`, times, pin, reply count and repliers | `body` (`m:<id>`: the id is taken and the body sealed first; the write then checks, under the conversation's lock, that no later id was written, else takes a new one — ids follow commit order) |
-| `reactions`, `saved`, `thread_follows` | as named | — |
-| `attachments` | the Chest's object (`u/<member>/<random>`), type, size, image size | `name` (`f:<object>`) |
-| `drafts` | per member, conversation and thread | `body` (`d:<member>:<conversation>:<thread>`) |
-| `people`, `handled` | first visit and last conversation; deliveries handled | — |
+## Test
 
-## Live
+```sh
+npm test               # types, unit tests, API tests (Docker: PostgreSQL)
+npm run test:browser   # after npm test: two members live in Chromium, phone, dark, French, axe
+npx chest check        # the Chest's own verdict (@argentic/chest-check, from a clone of Chest-SDK)
+```
 
-- `everyone` (presence): each page tracks `{away}` from its visibility;
-  the server reads it to notify only those not looking.
-- `c:{id}`, joined only for the conversation shown; membership table
-  `conversation_members`. Feeds of `messages` and `reactions` carry ids,
-  authors and times, never a body; the page fetches what it is told of
-  (`GET /chest/api/messages?ids=`), opened for its member. Members' sends
-  carry only `typing`: the page takes feed events only from the Chest
-  (no sender), since a member could send an event of any name.
-- Direct events (`realtime.send`): `activity` to the conversation's
-  members, `thread` to a thread's followers, `read` to the reader's other
-  pages, `conversations` when someone's list changes. A page that missed
-  some (a reconnect without replay) loads again what it shows.
+The API and browser tests run against a local Chest made of a disposable
+PostgreSQL, the SDK's fake Chest (members, files, sealing, realtime) and
+the realtime triggers the Chest installs. `CHAT_SCREENS=<folder>` keeps
+the browser test's screenshots. `npm run memory` measures the built
+server's memory at rest and under a burst of pages; on a Mac it sits at
+about 79 MiB at rest, as the Chest's starter tool does.
 
-## Commands
+## Licence
 
-- `npm run build` — types, the browser's files, the server.
-- `npm test` — types, builds, then unit and API tests against a disposable
-  PostgreSQL (Docker, `postgres:17`) and the SDK's fake Chest.
-- `npm run test:browser` — after `npm test`: two members live in Chromium,
-  desktop and phone, light and dark, English and French, axe on every
-  screen. `CHAT_SCREENS=<dir>` keeps the screenshots.
-- `npm run preview` — the tool on the local Chest of the tests with a team
-  and their conversations; sign in as someone with `/__as/<member id>`.
-- `npm run memory` — the server's memory at rest, during a burst of pages
-  and messages, and after; `node test/lab/memory.mjs <another tool>`
-  measures another tool the same way.
-- `npm run dev` — the Perseus workbench's preview (Vite rebuilds, the
-  server restarts).
-- `npx chest check` — from a clone of the SDK (`check/`): the Chest's
-  verdict on the repository.
-
-## Memory
-
-Measured on a Mac (Node 22, `npm run memory`, resident size three seconds
-after start): **Chat 76.8–81.8 MiB at rest (median 79.0 over six runs),
-the Perseus starter 76.2–80.1 MiB (median 77.5)**: about 1.5 MiB more at
-the median, within the 2–5 MiB spread between two runs of the same
-server. The tool's own code, the PostgreSQL client and the SDK's modules
-add about 4 MiB once loaded; `hono/tiny` and a minified server take back
-about 2.5 of them. After a burst of
-pages macOS keeps the high-water mark (130 MiB after 30 pages, the starter
-82): the heap itself falls back to 14 MiB after a collection; the first
-time formatted in a member's zone maps about 8 MiB of the runtime's time
-zone data. Linux, where the Chest runs, gives freed pages back; a
-measurement there is to do on the lab VM.
-
-## Rules of this code
-
-- No inline style or script: the policy has a nonce for the tool's own
-  files only; sizes are CSS, or CSSOM set by a script.
-- Every word in `src/shared/i18n/en.ts`, French typed against it.
-- Member text is rendered from the parsed tree (`src/shared/markdown.ts`),
-  never as HTML; links are `http`, `https` and `mailto` only.
-- Server checks for every read and write: `access` and `writable`, the
-  `readable` condition in lists, the uploads' own folder.
+The licence is to be chosen by the owner. Until one is set, no licence is
+granted.

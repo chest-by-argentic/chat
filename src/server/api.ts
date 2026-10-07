@@ -124,6 +124,7 @@ api.patch("/conversations/:id", async c => {
     ...(b["name"] !== undefined ? { name: text(b["name"], 80, 1) } : {}),
     ...(b["about"] !== undefined ? { about: text(b["about"], maxAbout) } : {}),
     ...(b["archived"] !== undefined ? { archived: flag(b["archived"]) } : {}),
+    ...(b["confidential"] !== undefined ? { confidential: flag(b["confidential"]) } : {}),
   });
   return c.json(await conversations.one(db(), c.get("who"), param(c, "id")));
 });

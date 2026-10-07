@@ -37,6 +37,8 @@ export type Conversation = {
   lastMessageId: number;
   lastMessageAt: string | null;
   isDefault: boolean;
+  // its notices carry no preview of the message
+  confidential: boolean;
   createdBy: string | null;
 };
 

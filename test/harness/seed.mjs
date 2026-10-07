@@ -3,10 +3,10 @@
 // conversation. For the browser test's screens and the preview.
 import { camille, groups, hugo, lea, robin, sam } from "./people.mjs";
 
-// as calls the tool's API on the lab's front as a member.
-export function as(lab, member) {
+// as calls the tool's API on the local's front as a member.
+export function as(local, member) {
   return async (method, path, body = method === "POST" ? {} : undefined) => {
-    const response = await fetch(lab.url + "/chest/api" + path, {
+    const response = await fetch(local.url + "/chest/api" + path, {
       method,
       headers: { cookie: `member=${member.id}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -18,16 +18,16 @@ export function as(lab, member) {
 }
 
 // visit opens the tool's page as a member, as their browser would.
-export async function visit(lab, member, path = "/chest") {
-  const response = await fetch(lab.url + path, { headers: { cookie: `member=${member.id}` } });
+export async function visit(local, member, path = "/chest") {
+  const response = await fetch(local.url + path, { headers: { cookie: `member=${member.id}` } });
   if (!response.ok) throw new Error(`GET ${path}: ${response.status}`);
   return response.text();
 }
 
-export async function seed(lab) {
-  const c = as(lab, camille), s = as(lab, sam), r = as(lab, robin), l = as(lab, lea), h = as(lab, hugo);
+export async function seed(local) {
+  const c = as(local, camille), s = as(local, sam), r = as(local, robin), l = as(local, lea), h = as(local, hugo);
   // Everyone opens Chat once: the default channel takes them in.
-  for (const m of [camille, sam, robin, lea, hugo]) await visit(lab, m);
+  for (const m of [camille, sam, robin, lea, hugo]) await visit(local, m);
   const general = (await c("GET", "/sidebar")).conversations.find(x => x.name === "general");
   const say = (call, conversation, text, thread) => call("POST", `/conversations/${conversation}/messages`, { text, ...(thread ? { thread } : {}) });
 

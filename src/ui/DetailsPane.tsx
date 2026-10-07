@@ -78,6 +78,14 @@ export function DetailsPane() {
             ))}
           </fieldset>
           <p className="muted">{w.notifyHint}</p>
+          {channel ? (
+            <label className="check">
+              <input type="checkbox" checked={viewing.confidential} disabled={!details?.canManage || viewing.archived}
+                onChange={e => { const on = e.target.checked; void a.update(viewing.id, { confidential: on }).catch(error => { a.fail(error); void a.refreshSidebar(); }); }} aria-describedby="confidential-hint" />
+              <span>{w.confidential}</span>
+            </label>
+          ) : null}
+          {channel ? <p id="confidential-hint" className="muted">{viewing.confidential ? w.confidentialOn : w.confidentialOff}{details && !details.canManage ? ` ${w.confidentialWho}` : ""}</p> : null}
         </section>
 
         <section className="detail-section">

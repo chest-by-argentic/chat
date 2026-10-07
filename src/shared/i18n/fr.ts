@@ -156,6 +156,10 @@ export const fr: Catalogue<Words> = {
   notifyNone: "Aucune",
   notifyDefault: what => `${what} — par défaut`,
   notifyHint: "Votre Chest vous prévient quand Chat n'est pas ouvert devant vous.",
+  confidential: "Confidentiel : pas d'aperçu dans les notifications",
+  confidentialOff: "Les notifications montrent les premiers mots de chaque message. Ces mots sortent alors du scellement : le Chest les garde dans ses notifications et peut les envoyer par e-mail.",
+  confidentialOn: "Les notifications disent seulement qui a écrit et où : aucun mot d'un message ne sort du scellement.",
+  confidentialWho: "Le créateur du canal et les administrateurs du Chest modifient ce réglage.",
   rename: "Renommer",
   nameLabel: "Nom",
   archive: "Archiver le canal",
@@ -230,6 +234,7 @@ export const fr: Catalogue<Words> = {
   notifyTitleChannel: (who, channel) => `${who} dans #${channel}`,
   notifyTitleDirect: who => who,
   notifyTitleThread: (who, where) => `${who} a répondu dans ${where}`,
+  notifyTitleMention: (who, where) => `${who} vous a mentionné dans ${where}`,
   notifyNew: "Nouveau message",
   notifyMention: "Vous a mentionné",
 

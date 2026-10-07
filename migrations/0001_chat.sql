@@ -18,6 +18,8 @@ create table conversations (
   archived_at timestamptz,
   -- everyone joins it at their first visit
   is_default boolean not null default false,
+  -- notices of its messages say who and where only, never a preview
+  confidential boolean not null default false,
   last_message_id bigint not null default 0,
   -- the last id written in it (messages, replies, the tool's lines): a
   -- write with a smaller one takes a new id, so ids follow commit order

@@ -3,13 +3,13 @@
 // a burst of members' pages and messages, and once quiet again. The same
 // script measures another tool built the same way (the Perseus starter):
 //
-//   node test/lab/memory.mjs [tool directory] [requests]
+//   node test/harness/memory.mjs [tool directory] [requests]
 //
 // Prints one line per moment, in MiB.
 import { execFileSync, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fakeChest, withMember } from "@argentic/chest-sdk/testing";
-import { database } from "./lab.mjs";
+import { database } from "./chest.mjs";
 import { members, groups } from "./people.mjs";
 
 const dir = resolve(process.argv[2] ?? ".");
