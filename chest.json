@@ -5,7 +5,7 @@
   "description": "Channels, direct messages and threads, live. Every message is sealed; who writes where and when is not, nor are files yet.",
   "icon": "chest/icon.svg",
   "capabilities": ["database", "files", "members", "members.groups", "notifications", "realtime", "sealed"],
-  "files": { "quota": "10 GiB", "maxObject": "100 MiB" },
+  "files": { "maxObject": "100 MiB" },
   "receives": ["member.*"],
   "schedules": [{ "name": "tidy", "cron": "30 3 * * *" }],
   "realtime": {
