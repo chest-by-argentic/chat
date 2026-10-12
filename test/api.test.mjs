@@ -182,13 +182,34 @@ test("threads page their replies; reading only goes forward", async () => {
   assert.equal(Number(still.last_read), top.id, "never back");
 });
 
-test("posts at once in one conversation: ids follow the order they are kept", async () => {
+test("posts at once in one conversation: ids follow the order they are kept", async t => {
   const c = await channel(camille, "public", { members: [sam.id, robin.id] });
+  // Transaction IDs are assigned before commit and do not establish commit
+  // order. PostgreSQL delivers NOTIFY from distinct transactions in commit
+  // order; this test-only trigger observes exactly that boundary.
+  const committed = [];
+  const listener = await local.sql.listen("test_post_order", payload => {
+    const [conversation, id] = payload.split(":").map(Number);
+    if (conversation === c.id) committed.push(id);
+  });
+  t.after(async () => {
+    await local.sql`drop trigger if exists test_post_order on messages`;
+    await local.sql`drop function if exists test_post_order()`;
+    await listener.unlisten();
+  });
+  await local.sql`create function test_post_order() returns trigger language plpgsql as $$
+    begin
+      perform pg_notify('test_post_order', NEW.conversation_id::text || ':' || NEW.id::text);
+      return NEW;
+    end;
+  $$`;
+  await local.sql`create trigger test_post_order after insert on messages for each row
+    when (NEW.kind = 'message') execute function test_post_order()`;
   const sent = await Promise.all(Array.from({ length: 12 }, (_, i) => say([camille, sam, robin][i % 3], c.id, `burst ${i}`)));
-  const rows = await local.sql`select id, xmin::text::bigint as tx from messages where conversation_id = ${c.id} and kind = 'message' order by id`;
+  const rows = await local.sql`select id from messages where conversation_id = ${c.id} and kind = 'message' order by id`;
   assert.equal(rows.length, 12);
-  const txs = rows.map(r => Number(r.tx));
-  assert.deepEqual(txs, [...txs].sort((x, y) => x - y), "a later id never commits before an earlier one");
+  for (const end = Date.now() + 5000; committed.length < 12 && Date.now() < end;) await settled();
+  assert.deepEqual(committed, rows.map(r => Number(r.id)), "a later id never commits before an earlier one");
   const [conv] = await local.sql`select last_message_id, last_posted_id from conversations where id = ${c.id}`;
   assert.equal(Number(conv.last_message_id), Math.max(...sent.map(m => m.id)));
   const page = await ok(sam, "GET", `/conversations/${c.id}/messages`);
